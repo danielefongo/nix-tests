@@ -10,10 +10,10 @@ run_test() {
     --arg nix-tests "import $NIX_TESTS_LIB_PATH { lib = (import <nixpkgs> {}).lib; }" \
     -A result 2>&1)
 
-  echo "$output" | sed 's/^trace: //' | grep -v '^[0-9]\+$'
+  echo "$output" | sed 's/^trace: //' | rg -v '^[0-9]+$'
 
   local failed_tests
-  failed_tests=$(echo "$output" | grep '^[0-9]\+$' | head -n 1)
+  failed_tests=$(echo "$output" | rg '^[0-9]+$' | head -n 1)
 
   if [ "$failed_tests" = "0" ]; then
     echo "PASS: $test_file"
@@ -21,7 +21,7 @@ run_test() {
     echo "FAIL: $test_file (failed test(s): $failed_tests)"
   fi
 
-  return "$failed_tests"
+  return "${failed_tests:-0}"
 }
 
 run_tests() {
@@ -32,18 +32,11 @@ run_tests() {
   fi
 
   local test_files=()
+  mapfile -t test_files < <(rg --files --glob "*_test.nix" "${args[@]}" | grep -E '_test\.nix$' | awk '!seen[$0]++' 2>/dev/null || true)
+
   for arg in "${args[@]}"; do
-    if [ -d "$arg" ]; then
-      mapfile -t dir_files < <(find "$arg" -name "*_test.nix" -type f)
-      test_files+=("${dir_files[@]}")
-    elif [ -f "$arg" ]; then
-      if [[ "$arg" =~ _test\.nix$ ]]; then
-        test_files+=("$arg")
-      else
-        echo "Skipping non-test file: $arg"
-      fi
-    else
-      echo "File not found, skipping: $arg"
+    if [[ -f "$arg" && ! "$arg" =~ _test\.nix$ ]]; then
+      echo "Warning: '$arg' is not a test file, skipping."
     fi
   done
 

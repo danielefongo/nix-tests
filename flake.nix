@@ -18,11 +18,11 @@
         nix-tests = pkgs.writeShellApplication {
           name = "nix-tests";
           runtimeInputs = with pkgs; [
-            nix
-            gnused
-            gnugrep
-            findutils
             coreutils
+            gawk
+            gnugrep
+            gnused
+            ripgrep
           ];
           text = ''
             NIX_TESTS_LIB_PATH="${self}/lib/tests.nix"

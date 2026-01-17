@@ -1,18 +1,27 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -eo pipefail
 
 run_test() {
   local test_file="$1"
   echo "Testing: $test_file"
-  if nix-instantiate --eval --strict --json "$test_file" \
+
+  local output
+  output=$(nix-instantiate --eval --strict "$test_file" \
     --arg nix-tests "import $NIX_TESTS_LIB_PATH { lib = (import <nixpkgs> {}).lib; }" \
-    -A result 2>&1 | sed 's/^trace: //' | grep -v '^true$'; then
+    -A result 2>&1)
+
+  echo "$output" | sed 's/^trace: //' | grep -v '^[0-9]\+$'
+
+  local failed_tests
+  failed_tests=$(echo "$output" | grep '^[0-9]\+$' | head -n 1)
+
+  if [ "$failed_tests" = "0" ]; then
     echo "PASS: $test_file"
-    return 0
   else
-    echo "FAIL: $test_file"
-    return 1
+    echo "FAIL: $test_file (failed test(s): $failed_tests)"
   fi
+
+  return "$failed_tests"
 }
 
 run_tests() {
@@ -46,14 +55,24 @@ run_tests() {
   echo "Found ${#test_files[@]} test file(s)"
   echo ""
 
+  local failed_count=0
+  set +e
   for test_file in "${test_files[@]}"; do
-    if ! run_test "$test_file"; then
-      return 1
-    fi
+    local test_result
+    run_test "$test_file"
+    test_result=$?
+    failed_count=$((failed_count + test_result))
     echo ""
   done
+  set -e
 
-  return 0
+  if [ $failed_count -gt 0 ]; then
+    echo "$failed_count test(s) failed"
+  else
+    echo "All tests passed"
+  fi
+
+  return $failed_count
 }
 
 run_tests "$@"

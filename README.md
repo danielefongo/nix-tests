@@ -7,6 +7,7 @@ A lightweight testing framework for Nix.
 
 ## Table of Contents
 
+- [Features](#features)
 - [Installation](#installation)
   - [Using Nix Flakes (devShell)](#using-nix-flakes-devshell)
   - [Using Nix Flakes (overlay)](#using-nix-flakes-overlay)
@@ -17,6 +18,14 @@ A lightweight testing framework for Nix.
   - [Custom Checks](#custom-checks)
 - [Example Test Structure](#example-test-structure)
 - [Output](#output)
+- [Limitations](#limitations)
+
+## Features
+
+- Simple test syntax in pure Nix
+- Simple and extensible assertion library
+- Test grouping support
+- Clear output
 
 ## Installation
 
@@ -129,6 +138,10 @@ nix-tests example_test.nix
 # Run multiple files/directories
 nix-tests tests/unit tests/integration specific_test.nix
 ```
+
+## Limitations
+
+When a test fails, the error pointer indicates the entire `checks` block rather than the specific individual check that failed.
 
 ## API
 

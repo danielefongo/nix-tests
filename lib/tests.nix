@@ -1,17 +1,18 @@
 { lib, ... }:
 let
   executeCheck =
-    testName: checkName: result:
+    testName: checkName: result: pos:
     let
       fullName = "${testName} -> ${checkName}";
+      location = if pos != null then "\n  at ${pos.file}:${toString pos.line}" else "";
     in
     if builtins.isBool result then
       if result then
         builtins.trace " ${fullName}" true
       else
-        builtins.trace " ${fullName}\n  Check failed" false
+        builtins.trace " ${fullName}\n  Check failed${location}" false
     else if builtins.isString result then
-      builtins.trace " ${fullName}\n  ${result}" false
+      builtins.trace " ${fullName}\n  ${result}${location}" false
     else
       throw "Check must return either boolean or string, got: ${builtins.typeOf result}";
 
@@ -39,11 +40,11 @@ let
       true;
 
   mkHelpers =
-    testName:
+    testName: pos:
     let
       check =
         checkName: checkLambda: actual:
-        executeCheck testName checkName (checkLambda actual);
+        executeCheck testName checkName (checkLambda actual) pos;
     in
     {
       inherit check;
@@ -65,7 +66,7 @@ let
   mkTest =
     testName: arg:
     let
-      helpers = mkHelpers testName;
+      helpers = mkHelpers testName (builtins.unsafeGetAttrPos "checks" arg);
       context = arg.context or { };
       checksFn = arg.checks or (_: _: [ ]);
     in
@@ -96,7 +97,7 @@ in
         list: lib.concatMap (item: if builtins.isList item then flattenTests item else [ item ]) list;
       allTests = flattenTests tests;
       allChecks = lib.concatLists (map (test: test.checks) allTests);
-      allPassed = lib.all (x: x == true) allChecks;
+      failedCount = builtins.length (builtins.filter (x: x == false) allChecks);
     in
-    if allPassed then true else throw "Some tests failed. Check the trace output above.";
+    failedCount;
 }

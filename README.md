@@ -5,21 +5,6 @@
 
 A lightweight testing framework for Nix.
 
-## Table of Contents
-
-- [Features](#features)
-- [Installation](#installation)
-  - [Using Nix Flakes (devShell)](#using-nix-flakes-devshell)
-  - [Using Nix Flakes (overlay)](#using-nix-flakes-overlay)
-- [Quick Start](#quick-start)
-- [API](#api)
-  - [Core Functions](#core-functions)
-  - [Assertions](#assertions)
-  - [Custom Checks](#custom-checks)
-- [Example Test Structure](#example-test-structure)
-- [Output](#output)
-- [Limitations](#limitations)
-
 ## Features
 
 - Simple test syntax in pure Nix
@@ -137,6 +122,12 @@ nix-tests example_test.nix
 
 # Run multiple files/directories
 nix-tests tests/unit tests/integration specific_test.nix
+
+# Output test results in JSON Lines format
+nix-tests --json
+
+# Example: Parse JSON output with jq
+nix-tests --json | jq -s .
 ```
 
 ## Limitations

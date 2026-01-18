@@ -10,7 +10,7 @@ let
     else if builtins.isString result then
       {
         name = checkName;
-        error = result;
+        failure = result;
         success = false;
       }
     else

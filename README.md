@@ -1,9 +1,10 @@
 # nix-tests
 
 ![Nix](https://img.shields.io/badge/Nix-5277C3?style=flat-square&logo=nix&logoColor=white)
+![Rust](https://img.shields.io/badge/Rust-000000?style=flat-square&logo=rust&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)
 
-A lightweight testing framework for Nix.
+A lightweight testing framework for Nix, written in Rust.
 
 ## Features
 
@@ -11,6 +12,7 @@ A lightweight testing framework for Nix.
 - Simple and extensible assertion library
 - Test grouping support
 - Clear output
+- Fast parallel test execution
 
 ## Installation
 
@@ -124,10 +126,10 @@ nix-tests example_test.nix
 nix-tests tests/unit tests/integration specific_test.nix
 
 # Output test results in JSON Lines format
-nix-tests --json
+nix-tests --format json
 
 # Example: Parse JSON output with jq
-nix-tests --json | jq -s .
+nix-tests --format json | jq -s .
 ```
 
 ## Limitations

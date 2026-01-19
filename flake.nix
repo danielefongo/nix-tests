@@ -56,7 +56,9 @@
             pkgs.rustfmt
           ];
 
-          NIX_TESTS_LIB_PATH = ./lib/tests.nix;
+          shellHook = ''
+            export NIX_TESTS_LIB_PATH="$PWD/lib/tests.nix"
+          '';
         };
       }
     )

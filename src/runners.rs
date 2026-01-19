@@ -34,16 +34,14 @@ impl NixTestRunner {
     pub fn new() -> Self {
         let nix_tests_path = env::var("NIX_TESTS_LIB_PATH")
             .expect("NIX_TESTS_LIB_PATH environment variable not set");
+
         Self { nix_tests_path }
     }
 }
 
 impl TestFileRunner for NixTestRunner {
     fn run(&self, test_file: String) -> TestFileReport {
-        let nix_tests = format!(
-            "import {} {{ lib = (import <nixpkgs> {{}}).lib; }}",
-            self.nix_tests_path
-        );
+        let nix_tests = format!("import {} {{}}", self.nix_tests_path);
 
         let output = Command::new("nix-instantiate")
             .args(["--eval", "--strict", "--json", &test_file])
@@ -53,26 +51,20 @@ impl TestFileRunner for NixTestRunner {
 
         match output {
             Ok(output) if output.status.success() => {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                let data: serde_json::Value =
-                    serde_json::from_str(&stdout).expect("Failed to parse JSON");
-
-                serde_json::from_value::<TestFileCompletedReport>(data)
-                    .map(|report| report.with_file(test_file.clone()))
-                    .map(TestFileReport::Completed)
-                    .unwrap_or_else(|e| {
-                        TestFileReport::Errored(TestFileErroredReport {
-                            file: test_file.clone(),
-                            error: format!("Failed to deserialize test report: {}", e),
-                        })
-                    })
+                match serde_json::from_slice::<TestFileCompletedReport>(&output.stdout) {
+                    Ok(report) => TestFileReport::Completed(report.with_file(test_file)),
+                    Err(e) => TestFileReport::Errored(TestFileErroredReport {
+                        file: test_file,
+                        error: format!("Failed to deserialize test report: {}", e),
+                    }),
+                }
             }
             Ok(output) => TestFileReport::Errored(TestFileErroredReport {
                 file: test_file,
                 error: String::from_utf8_lossy(&output.stderr).to_string(),
             }),
             Err(e) => TestFileReport::Errored(TestFileErroredReport {
-                file: test_file.to_string(),
+                file: test_file,
                 error: format!("Failed to execute nix-instantiate: {}", e),
             }),
         }
@@ -117,7 +109,7 @@ where
                 let runner = self.test_runner.clone();
                 tokio::spawn(async move { runner.run(path) })
             })
-            .buffer_unordered(10)
+            .buffer_unordered(num_cpus::get())
             .filter_map(|result| async move { result.ok() })
             .inspect(|report| {
                 self.reporter

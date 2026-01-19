@@ -10,6 +10,7 @@ anyhow = "1.0"
 clap = { version = "4.5.54", features = ["derive"] }
 tokio = { version = "1.49.0", features = ["fs", "macros", "rt-multi-thread"] }
 futures = "0.3.31"
+num_cpus = "1.17.0"
 
 [dev-dependencies]
 assert2 = "0.3.16"

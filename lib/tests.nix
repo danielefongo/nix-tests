@@ -1,5 +1,8 @@
-{ lib, ... }:
+{ ... }:
 let
+  concatMap = f: list: builtins.concatLists (map f list);
+  all = pred: list: builtins.all pred list;
+
   executeCheck =
     checkName: result:
     if builtins.isBool result then
@@ -69,7 +72,7 @@ let
       pos = builtins.unsafeGetAttrPos "checks" spec;
       location = if pos != null then "${pos.file}:${toString pos.line}" else "unknown";
       checks = spec.checks (mkHelpers pos) spec.context;
-      success = builtins.all (c: c.success) checks;
+      success = all (c: c.success) checks;
     in
     {
       inherit
@@ -83,7 +86,7 @@ let
   flattenTests =
     pathPrefix: item:
     if item ? tests then
-      lib.concatMap (child: flattenTests (pathPrefix ++ [ item.name ]) child) item.tests
+      concatMap (child: flattenTests (pathPrefix ++ [ item.name ]) child) item.tests
     else
       [ (runTest (pathPrefix ++ [ item.name ]) item.spec) ];
 in
@@ -97,6 +100,6 @@ in
   };
 
   runTests = tests: {
-    tests = lib.concatMap (item: flattenTests [ ] item) tests;
+    tests = concatMap (item: flattenTests [ ] item) tests;
   };
 }

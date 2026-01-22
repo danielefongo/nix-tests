@@ -128,40 +128,42 @@ impl SearchTestFiles for FindSearchTestFiles {
 
 #[cfg(test)]
 mod files_tests {
+    use std::fs::{self, File};
+    use std::path::PathBuf;
+
     use assert2::check;
-    use rstest::rstest;
-    use std::fs;
-    use std::io::Write;
+    use rstest::{fixture, rstest};
     use tempfile::TempDir;
 
     use super::*;
 
-    fn create_temp_dir_with_files(files: &[&str]) -> (TempDir, String) {
-        let dir = TempDir::new().unwrap();
-        for file in files {
-            let file_path = dir.path().join(file);
-            let mut f = fs::File::create(&file_path).unwrap();
-            f.write_all(b"test content").unwrap();
-        }
-        let path = dir.path().to_str().unwrap().to_string();
-        (dir, path)
+    macro_rules! path {
+        ($path:expr) => {
+            $path.to_string_lossy().to_string()
+        };
+        ($path:expr, $sub_path:literal) => {
+            $path.join($sub_path).to_string_lossy().to_string()
+        };
     }
 
     #[rstest]
     #[case(RgSearchTestFiles)]
     #[case(FindSearchTestFiles)]
-    fn it_finds_valid_test_files_by_path(#[case] search: impl SearchTestFiles) {
-        let (_dir, path) =
-            create_temp_dir_with_files(&["file1_test.nix", "file2_test.nix", "file3_test.nix"]);
+    fn it_finds_valid_test_files_by_path(path: PathBuf, #[case] search: impl SearchTestFiles) {
+        create_file(&path, "file1_test.nix");
+        create_file(&path, "file2_test.nix");
+        create_file(&path, "file3_test.nix");
 
-        let test_files = search.search_test_files(vec![path.clone()]).unwrap();
+        let test_files = search
+            .search_test_files(vec![path.to_string_lossy().to_string()])
+            .unwrap();
 
         check!(
             test_files
                 == vec![
-                    TestFile::Valid(format!("{path}/file1_test.nix")),
-                    TestFile::Valid(format!("{path}/file2_test.nix")),
-                    TestFile::Valid(format!("{path}/file3_test.nix")),
+                    TestFile::Valid(path!(path, "file1_test.nix")),
+                    TestFile::Valid(path!(path, "file2_test.nix")),
+                    TestFile::Valid(path!(path, "file3_test.nix")),
                 ]
         );
     }
@@ -169,9 +171,9 @@ mod files_tests {
     #[rstest]
     #[case(RgSearchTestFiles)]
     #[case(FindSearchTestFiles)]
-    fn it_finds_valid_test_files_by_file(#[case] search: impl SearchTestFiles) {
-        let (_dir, path) = create_temp_dir_with_files(&["file_test.nix"]);
-        let file_path = format!("{path}/file_test.nix");
+    fn it_finds_valid_test_files_by_file(path: PathBuf, #[case] search: impl SearchTestFiles) {
+        create_file(&path, "file_test.nix");
+        let file_path = path!(path, "file_test.nix");
 
         let test_files = search.search_test_files(vec![file_path.clone()]).unwrap();
 
@@ -181,10 +183,10 @@ mod files_tests {
     #[rstest]
     #[case(RgSearchTestFiles)]
     #[case(FindSearchTestFiles)]
-    fn it_finds_empty_when_no_test_files(#[case] search: impl SearchTestFiles) {
-        let (_dir, path) = create_temp_dir_with_files(&["regular.nix"]);
+    fn it_finds_empty_when_no_test_files(path: PathBuf, #[case] search: impl SearchTestFiles) {
+        create_file(&path, "regular.nix");
 
-        let test_files = search.search_test_files(vec![path]).unwrap();
+        let test_files = search.search_test_files(vec![path!(path)]).unwrap();
 
         check!(test_files == vec![]);
     }
@@ -192,9 +194,9 @@ mod files_tests {
     #[rstest]
     #[case(RgSearchTestFiles)]
     #[case(FindSearchTestFiles)]
-    fn it_removes_duplicate_test_files(#[case] search: impl SearchTestFiles) {
-        let (_dir, path) = create_temp_dir_with_files(&["file_test.nix"]);
-        let file_path = format!("{path}/file_test.nix");
+    fn it_removes_duplicate_test_files(path: PathBuf, #[case] search: impl SearchTestFiles) {
+        create_file(&path, "file_test.nix");
+        let file_path = path!(path, "file_test.nix");
 
         let test_files = search
             .search_test_files(vec![file_path.clone(), file_path.clone()])
@@ -217,12 +219,11 @@ mod files_tests {
     #[rstest]
     #[case(RgSearchTestFiles)]
     #[case(FindSearchTestFiles)]
-    fn it_handles_invalid_test_files(#[case] search: impl SearchTestFiles) {
-        let (_dir, path) = create_temp_dir_with_files(&["flake.nix"]);
-        let file_path = format!("{path}/flake.nix");
-        let paths = vec![file_path.clone()];
+    fn it_handles_invalid_test_files(path: PathBuf, #[case] search: impl SearchTestFiles) {
+        create_file(&path, "flake.nix");
+        let file_path = path!(path, "flake.nix");
 
-        let test_files = search.search_test_files(paths).unwrap();
+        let test_files = search.search_test_files(vec![file_path.clone()]).unwrap();
 
         check!(test_files == vec![TestFile::Invalid(file_path)]);
     }
@@ -230,11 +231,12 @@ mod files_tests {
     #[rstest]
     #[case(RgSearchTestFiles)]
     #[case(FindSearchTestFiles)]
-    fn it_handles_mixed_paths(#[case] search: impl SearchTestFiles) {
-        let (_dir, path) = create_temp_dir_with_files(&["file1_test.nix", "file2_test.nix"]);
+    fn it_handles_mixed_paths(path: PathBuf, #[case] search: impl SearchTestFiles) {
+        create_file(&path, "file1_test.nix");
+        create_file(&path, "file2_test.nix");
 
         let nonexistent = "/tmp/not_existing".to_string();
-        let paths = vec![path.clone(), nonexistent.clone()];
+        let paths = vec![path.to_string_lossy().to_string(), nonexistent.clone()];
 
         let test_files = search.search_test_files(paths).unwrap();
 
@@ -242,9 +244,22 @@ mod files_tests {
             test_files
                 == vec![
                     TestFile::NotFound(nonexistent),
-                    TestFile::Valid(format!("{path}/file1_test.nix")),
-                    TestFile::Valid(format!("{path}/file2_test.nix")),
+                    TestFile::Valid(path!(path, "file1_test.nix")),
+                    TestFile::Valid(path!(path, "file2_test.nix")),
                 ]
         );
+    }
+
+    #[fixture]
+    fn path() -> PathBuf {
+        TempDir::new().unwrap().path().to_path_buf()
+    }
+
+    fn create_file(base: &PathBuf, relative_path: &str) {
+        let file_path = base.join(relative_path);
+        if let Some(parent) = file_path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        File::create(&file_path).unwrap();
     }
 }

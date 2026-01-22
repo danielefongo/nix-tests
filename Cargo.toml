@@ -11,6 +11,7 @@ clap = { version = "4.5.54", features = ["derive"] }
 tokio = { version = "1.49.0", features = ["fs", "macros", "rt-multi-thread"] }
 futures = "0.3.31"
 num_cpus = "1.17.0"
+toml = "0.9.11"
 
 [dev-dependencies]
 assert2 = "0.3.16"

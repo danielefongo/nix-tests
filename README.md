@@ -126,13 +126,26 @@ nix-tests example_test.nix
 
 # Run multiple files/directories
 nix-tests tests/unit tests/integration specific_test.nix
-
-# Output test results in JSON Lines format
-nix-tests --format json
-
-# Example: Parse JSON output with jq
-nix-tests --format json | jq -s .
 ```
+
+> **Note:** Additional options are available. Run `nix-tests --help` to see all CLI options.
+
+## Configuration
+
+You can create a `.nix-tests.toml` file in your project. Use `nix-tests --show` to see the default configuration.
+
+### CLI Options
+
+- `--help` - Show help message with all available options
+- `--config <PATH>` - Specify a custom config directory or file
+- `--show` - Display the loaded configuration and exit
+- Other CLI options (`--num-threads`, `--format`, etc.) match the TOML config names and override the loaded configuration
+
+### Config Discovery
+
+- Without `--config`: uses default values
+- With `--config <PATH>`: searches for `.nix-tests.toml` in the specified directory and parent directories (stopping at `flake.lock`, `.git`, or `/`), or uses the file directly if it's a `.toml` file
+- If no config file is found, default values are used
 
 ## Limitations
 

@@ -10,6 +10,43 @@ use crate::{
     },
 };
 
+pub mod config {
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Default, Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+    #[serde(rename_all = "kebab-case")]
+    pub struct Config {
+        #[serde(default)]
+        pub num_threads: NumThreads,
+    }
+
+    #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+    #[serde(transparent)]
+    pub struct NumThreads(usize);
+
+    impl NumThreads {
+        pub fn new(num: usize) -> Self {
+            Self(num)
+        }
+
+        pub fn get(&self) -> usize {
+            self.0
+        }
+    }
+
+    impl Default for NumThreads {
+        fn default() -> Self {
+            Self(num_cpus::get())
+        }
+    }
+
+    impl From<usize> for NumThreads {
+        fn from(value: usize) -> Self {
+            Self(value)
+        }
+    }
+}
+
 pub trait TestFileRunner {
     fn run(&self, test_file: String) -> TestFileReport;
 }
@@ -73,18 +110,20 @@ impl TestFileRunner for NixTestRunner {
 
 pub struct TestSuiteRunner<TR: TestFileRunner, R: Reporter> {
     pub test_runner: Arc<TR>,
-    pub reporter: Arc<R>,
+    pub reporter: R,
+    pub config: config::Config,
 }
 
 impl<TR, R> TestSuiteRunner<TR, R>
 where
     TR: TestFileRunner + Send + Sync + 'static,
-    R: Reporter + Send + Sync + 'static,
+    R: Reporter + Send + Sync,
 {
-    pub fn new(test_runner: Arc<TR>, reporter: Arc<R>) -> Self {
+    pub fn new(test_runner: Arc<TR>, reporter: R, run_config: config::Config) -> Self {
         Self {
             test_runner,
             reporter,
+            config: run_config,
         }
     }
 
@@ -109,7 +148,7 @@ where
                 let runner = self.test_runner.clone();
                 tokio::spawn(async move { runner.run(path) })
             })
-            .buffer_unordered(num_cpus::get())
+            .buffer_unordered(self.config.num_threads.get())
             .filter_map(|result| async move { result.ok() })
             .inspect(|report| {
                 self.reporter
@@ -134,8 +173,11 @@ mod test_suite_runner_tests {
     use mockall::{predicate::eq, Sequence};
 
     use super::*;
-    use crate::reports::{
-        MockReporter, ReportEvent, TestFileCompletedReport, TestFileReport, TestSuiteReport,
+    use crate::{
+        reports::{
+            MockReporter, ReportEvent, TestFileCompletedReport, TestFileReport, TestSuiteReport,
+        },
+        runners::config::Config,
     };
 
     #[tokio::test]
@@ -178,7 +220,7 @@ mod test_suite_runner_tests {
             ))))
             .returning(|_event| {});
 
-        let suite_runner = TestSuiteRunner::new(Arc::new(test_runner), Arc::new(reporter));
+        let suite_runner = TestSuiteRunner::new(Arc::new(test_runner), reporter, Config::default());
 
         suite_runner
             .run(&[crate::files::TestFile::Valid("my_test.nix".to_string())])
@@ -213,7 +255,7 @@ mod test_suite_runner_tests {
             ))))
             .returning(|_event| {});
 
-        let suite_runner = TestSuiteRunner::new(Arc::new(test_runner), Arc::new(reporter));
+        let suite_runner = TestSuiteRunner::new(Arc::new(test_runner), reporter, Config::default());
 
         suite_runner
             .run(&[
@@ -226,11 +268,13 @@ mod test_suite_runner_tests {
 
 #[cfg(test)]
 mod runner_tests {
+    use std::io::Write;
+
+    use assert2::{check, let_assert};
+    use tempfile::NamedTempFile;
+
     use super::*;
     use crate::reports::{CheckReport, TestFileCompletedReport, TestFileReport, TestReport};
-    use assert2::{check, let_assert};
-    use std::io::Write;
-    use tempfile::NamedTempFile;
 
     fn create_temp_nix_file(content: &str) -> (NamedTempFile, String) {
         let mut file = NamedTempFile::new().unwrap();

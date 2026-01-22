@@ -1,5 +1,40 @@
 use serde::{Deserialize, Serialize};
 
+use crate::reports::config::Format;
+
+pub mod config {
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+    #[serde(rename_all = "kebab-case")]
+    pub struct Config {
+        #[serde(default)]
+        pub format: Format,
+    }
+
+    impl Config {
+        fn default_format() -> Format {
+            Format::Human
+        }
+    }
+
+    impl Default for Config {
+        fn default() -> Self {
+            Self {
+                format: Self::default_format(),
+            }
+        }
+    }
+
+    #[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+    #[serde(rename_all = "kebab-case")]
+    pub enum Format {
+        #[default]
+        Json,
+        Human,
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct TestSuiteReport(Vec<TestFileReport>);
 
@@ -197,6 +232,26 @@ impl Reporter for HumanReporter {
                 }
             }
         }
+    }
+}
+
+pub struct ConfigurableReporter {
+    inner: Box<dyn Reporter + Send + Sync>,
+}
+
+impl ConfigurableReporter {
+    pub fn new(report_config: &config::Config) -> Self {
+        let inner: Box<dyn Reporter + Send + Sync> = match report_config.format {
+            Format::Human => Box::new(HumanReporter),
+            Format::Json => Box::new(JsonReporter),
+        };
+        Self { inner }
+    }
+}
+
+impl Reporter for ConfigurableReporter {
+    fn on(&self, report_event: &ReportEvent) {
+        self.inner.on(report_event);
     }
 }
 

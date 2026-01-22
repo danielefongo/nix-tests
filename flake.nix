@@ -54,6 +54,7 @@
             rustToolchain
             pkgs.clippy
             pkgs.rustfmt
+            pkgs.ripgrep
           ];
 
           shellHook = ''

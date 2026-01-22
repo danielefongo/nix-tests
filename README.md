@@ -16,6 +16,8 @@ A lightweight testing framework for Nix, written in Rust.
 
 ## Installation
 
+> **Note:** `nix-tests` requires either `rg` (ripgrep, preferred for performance) or `find` to be available in your system. It will automatically use `rg` if available, otherwise fallback to `find`.
+
 ### Using Nix Flakes (devShell)
 
 ```nix

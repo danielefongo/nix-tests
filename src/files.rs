@@ -44,15 +44,16 @@ impl PartialEq for TestFile {
     }
 }
 
-pub trait FindTestFiles {
-    fn find_test_files(&self) -> Result<Vec<TestFile>, anyhow::Error>;
-}
+pub trait SearchTestFiles {
+    fn find_files_in_dir(
+        &self,
+        path: &Path,
+    ) -> Result<Box<dyn Iterator<Item = String>>, anyhow::Error>;
 
-impl FindTestFiles for Vec<String> {
-    fn find_test_files(&self) -> Result<Vec<TestFile>, anyhow::Error> {
+    fn search_test_files(&self, files: Vec<String>) -> Result<Vec<TestFile>, anyhow::Error> {
         let mut test_files = Vec::new();
 
-        for file in self {
+        for file in &files {
             let path = Path::new(file);
 
             if !path.exists() {
@@ -69,13 +70,8 @@ impl FindTestFiles for Vec<String> {
                 continue;
             }
 
-            let output = Command::new("rg")
-                .args(["--files", "--glob", "*_test.nix", path.to_str().unwrap()])
-                .output()?;
-
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            for line in stdout.lines() {
-                test_files.push(TestFile::Valid(line.to_string()));
+            for found_file in self.find_files_in_dir(path)? {
+                test_files.push(TestFile::Valid(found_file));
             }
         }
 
@@ -86,9 +82,54 @@ impl FindTestFiles for Vec<String> {
     }
 }
 
+pub struct RgSearchTestFiles;
+
+impl SearchTestFiles for RgSearchTestFiles {
+    fn find_files_in_dir(
+        &self,
+        path: &Path,
+    ) -> Result<Box<dyn Iterator<Item = String>>, anyhow::Error> {
+        let output = Command::new("rg")
+            .args(["--files", "--glob", "*_test.nix", path.to_str().unwrap()])
+            .output()?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        Ok(Box::new(
+            stdout
+                .lines()
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>()
+                .into_iter(),
+        ))
+    }
+}
+
+pub struct FindSearchTestFiles;
+
+impl SearchTestFiles for FindSearchTestFiles {
+    fn find_files_in_dir(
+        &self,
+        path: &Path,
+    ) -> Result<Box<dyn Iterator<Item = String>>, anyhow::Error> {
+        let output = Command::new("find")
+            .args([path.to_str().unwrap(), "-name", "*_test.nix", "-type", "f"])
+            .output()?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        Ok(Box::new(
+            stdout
+                .lines()
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>()
+                .into_iter(),
+        ))
+    }
+}
+
 #[cfg(test)]
 mod files_tests {
     use assert2::check;
+    use rstest::rstest;
     use std::fs;
     use std::io::Write;
     use tempfile::TempDir;
@@ -106,13 +147,14 @@ mod files_tests {
         (dir, path)
     }
 
-    #[test]
-    fn it_finds_valid_test_files_by_path() {
+    #[rstest]
+    #[case(RgSearchTestFiles)]
+    #[case(FindSearchTestFiles)]
+    fn it_finds_valid_test_files_by_path(#[case] search: impl SearchTestFiles) {
         let (_dir, path) =
             create_temp_dir_with_files(&["file1_test.nix", "file2_test.nix", "file3_test.nix"]);
 
-        let paths = vec![path.clone()];
-        let test_files = paths.find_test_files().unwrap();
+        let test_files = search.search_test_files(vec![path.clone()]).unwrap();
 
         check!(
             test_files
@@ -124,64 +166,77 @@ mod files_tests {
         );
     }
 
-    #[test]
-    fn it_finds_valid_test_files_by_file() {
+    #[rstest]
+    #[case(RgSearchTestFiles)]
+    #[case(FindSearchTestFiles)]
+    fn it_finds_valid_test_files_by_file(#[case] search: impl SearchTestFiles) {
         let (_dir, path) = create_temp_dir_with_files(&["file_test.nix"]);
         let file_path = format!("{path}/file_test.nix");
 
-        let paths = vec![file_path.clone()];
-        let test_files = paths.find_test_files().unwrap();
+        let test_files = search.search_test_files(vec![file_path.clone()]).unwrap();
 
         check!(test_files == vec![TestFile::Valid(file_path)]);
     }
 
-    #[test]
-    fn it_finds_empty_when_no_test_files() {
+    #[rstest]
+    #[case(RgSearchTestFiles)]
+    #[case(FindSearchTestFiles)]
+    fn it_finds_empty_when_no_test_files(#[case] search: impl SearchTestFiles) {
         let (_dir, path) = create_temp_dir_with_files(&["regular.nix"]);
 
-        let paths = vec![path];
-        let test_files = paths.find_test_files().unwrap();
+        let test_files = search.search_test_files(vec![path]).unwrap();
 
         check!(test_files == vec![]);
     }
 
-    #[test]
-    fn it_removes_duplicate_test_files() {
+    #[rstest]
+    #[case(RgSearchTestFiles)]
+    #[case(FindSearchTestFiles)]
+    fn it_removes_duplicate_test_files(#[case] search: impl SearchTestFiles) {
         let (_dir, path) = create_temp_dir_with_files(&["file_test.nix"]);
         let file_path = format!("{path}/file_test.nix");
 
-        let paths = vec![file_path.clone(), file_path.clone()];
-        let test_files = paths.find_test_files().unwrap();
+        let test_files = search
+            .search_test_files(vec![file_path.clone(), file_path.clone()])
+            .unwrap();
 
         check!(test_files == vec![TestFile::Valid(file_path)]);
     }
 
-    #[test]
-    fn it_handles_nonexistent_paths() {
-        let paths = vec!["/tmp/not_existing".to_string()];
-        let test_files = paths.find_test_files().unwrap();
+    #[rstest]
+    #[case(RgSearchTestFiles)]
+    #[case(FindSearchTestFiles)]
+    fn it_handles_nonexistent_paths(#[case] search: impl SearchTestFiles) {
+        let test_files = search
+            .search_test_files(vec!["/tmp/not_existing".to_string()])
+            .unwrap();
 
         check!(test_files == vec![TestFile::NotFound("/tmp/not_existing".to_string())]);
     }
 
-    #[test]
-    fn it_handles_invalid_test_files() {
+    #[rstest]
+    #[case(RgSearchTestFiles)]
+    #[case(FindSearchTestFiles)]
+    fn it_handles_invalid_test_files(#[case] search: impl SearchTestFiles) {
         let (_dir, path) = create_temp_dir_with_files(&["flake.nix"]);
         let file_path = format!("{path}/flake.nix");
-
         let paths = vec![file_path.clone()];
-        let test_files = paths.find_test_files().unwrap();
+
+        let test_files = search.search_test_files(paths).unwrap();
 
         check!(test_files == vec![TestFile::Invalid(file_path)]);
     }
 
-    #[test]
-    fn it_handles_mixed_paths() {
+    #[rstest]
+    #[case(RgSearchTestFiles)]
+    #[case(FindSearchTestFiles)]
+    fn it_handles_mixed_paths(#[case] search: impl SearchTestFiles) {
         let (_dir, path) = create_temp_dir_with_files(&["file1_test.nix", "file2_test.nix"]);
 
         let nonexistent = "/tmp/not_existing".to_string();
         let paths = vec![path.clone(), nonexistent.clone()];
-        let test_files = paths.find_test_files().unwrap();
+
+        let test_files = search.search_test_files(paths).unwrap();
 
         check!(
             test_files

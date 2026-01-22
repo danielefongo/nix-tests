@@ -15,4 +15,5 @@ num_cpus = "1.17.0"
 [dev-dependencies]
 assert2 = "0.3.16"
 mockall = "0.14.0"
+rstest = "0.26.1"
 tempfile = "3.14"

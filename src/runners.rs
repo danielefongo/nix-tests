@@ -1,6 +1,7 @@
-use std::{env, process::Command, sync::Arc};
+use std::{env, future::Future, sync::Arc};
 
 use futures::{stream, StreamExt};
+use tokio::process::Command;
 
 use crate::{
     files::TestFile,
@@ -18,6 +19,9 @@ pub mod config {
     pub struct Config {
         #[serde(default)]
         pub num_threads: NumThreads,
+
+        #[serde(default)]
+        pub timeout: Option<u64>,
     }
 
     #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -48,14 +52,14 @@ pub mod config {
 }
 
 pub trait TestFileRunner {
-    fn run(&self, test_file: String) -> TestFileReport;
+    fn run(&self, test_file: String) -> impl Future<Output = TestFileReport> + Send;
 }
 
 #[cfg(test)]
 mockall::mock! {
     pub TestFileRunner {}
     impl TestFileRunner for TestFileRunner {
-        fn run(&self, test_file: String) -> TestFileReport;
+        fn run(&self, test_file: String) -> impl Future<Output = TestFileReport> + Send;
     }
     impl Clone for TestFileRunner {
         fn clone(&self) -> Self {}
@@ -77,14 +81,15 @@ impl NixTestRunner {
 }
 
 impl TestFileRunner for NixTestRunner {
-    fn run(&self, test_file: String) -> TestFileReport {
+    async fn run(&self, test_file: String) -> TestFileReport {
         let nix_tests = format!("import {} {{}}", self.nix_tests_path);
 
         let output = Command::new("nix-instantiate")
             .args(["--eval", "--strict", "--json", &test_file])
             .args(["--arg", "nix-tests", &nix_tests])
             .args(["-A", "result"])
-            .output();
+            .output()
+            .await;
 
         match output {
             Ok(output) if output.status.success() => {
@@ -146,10 +151,9 @@ where
             })
             .map(|path| {
                 let runner = self.test_runner.clone();
-                tokio::spawn(async move { runner.run(path) })
+                async move { runner.run(path).await }
             })
             .buffer_unordered(self.config.num_threads.get())
-            .filter_map(|result| async move { result.ok() })
             .inspect(|report| {
                 self.reporter
                     .on(&ReportEvent::TestCompleted(report.clone()));
@@ -170,6 +174,7 @@ where
 mod test_suite_runner_tests {
     use std::sync::Arc;
 
+    use futures::FutureExt;
     use mockall::{predicate::eq, Sequence};
 
     use super::*;
@@ -187,11 +192,14 @@ mod test_suite_runner_tests {
             .expect_run()
             .withf(|file| file == "my_test.nix")
             .once()
-            .returning(|_| {
-                TestFileReport::Completed(TestFileCompletedReport {
-                    file: "my_test.nix".to_string(),
-                    tests: vec![],
-                })
+            .return_once(|_| {
+                async {
+                    TestFileReport::Completed(TestFileCompletedReport {
+                        file: "my_test.nix".to_string(),
+                        tests: vec![],
+                    })
+                }
+                .boxed()
             });
 
         let mut sequence = Sequence::new();
@@ -285,8 +293,8 @@ mod runner_tests {
         (file, path)
     }
 
-    #[test]
-    fn it_runs_a_simple_test_file() {
+    #[tokio::test]
+    async fn it_runs_a_simple_test_file() {
         let (_file, path) = create_temp_nix_file(
             r#"{
   pkgs ? import <nixpkgs> { },
@@ -321,7 +329,7 @@ in
 "#,
         );
 
-        let report = NixTestRunner::new().run(path.clone());
+        let report = NixTestRunner::new().run(path.clone()).await;
 
         check!(
             report
@@ -360,8 +368,8 @@ in
         );
     }
 
-    #[test]
-    fn it_runs_a_groups_test_file() {
+    #[tokio::test]
+    async fn it_runs_a_groups_test_file() {
         let (_file, path) = create_temp_nix_file(
             r#"{
   pkgs ? import <nixpkgs> { },
@@ -396,7 +404,7 @@ in
 "#,
         );
 
-        let report = NixTestRunner::new().run(path.clone());
+        let report = NixTestRunner::new().run(path.clone()).await;
 
         check!(
             report
@@ -438,19 +446,19 @@ in
         );
     }
 
-    #[test]
-    fn it_handles_nix_evaluation_errors() {
+    #[tokio::test]
+    async fn it_handles_nix_evaluation_errors() {
         let (_file, path) = create_temp_nix_file("invalid_nix_syntax_here");
 
-        let report = NixTestRunner::new().run(path.clone());
+        let report = NixTestRunner::new().run(path.clone()).await;
 
         let_assert!(TestFileReport::Errored(TestFileErroredReport { file, error }) = report);
         check!(file == path);
         check!(error.contains("error:"));
     }
 
-    #[test]
-    fn it_handles_malformed_json_structure() {
+    #[tokio::test]
+    async fn it_handles_malformed_json_structure() {
         let (_file, path) = create_temp_nix_file(
             r#"{
   pkgs ? import <nixpkgs> { },
@@ -465,17 +473,17 @@ in
 "#,
         );
 
-        let report = NixTestRunner::new().run(path.clone());
+        let report = NixTestRunner::new().run(path.clone()).await;
 
         let_assert!(TestFileReport::Errored(TestFileErroredReport { file, error }) = report);
         check!(file == path);
         check!(error.contains("Failed to deserialize test report"));
     }
 
-    #[test]
-    fn it_handles_command_execution_failure() {
+    #[tokio::test]
+    async fn it_handles_command_execution_failure() {
         let invalid_path = "test\0file.nix".to_string();
-        let report = NixTestRunner::new().run(invalid_path.clone());
+        let report = NixTestRunner::new().run(invalid_path.clone()).await;
 
         let_assert!(TestFileReport::Errored(TestFileErroredReport { file, error }) = report);
         check!(file == invalid_path);

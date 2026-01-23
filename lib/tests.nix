@@ -99,7 +99,9 @@ in
     inherit name tests;
   };
 
-  runTests = tests: {
-    tests = concatMap (item: flattenTests [ ] item) tests;
-  };
+  runTests = tests:
+    let
+      result = { tests = concatMap (item: flattenTests [ ] item) tests; };
+    in
+      builtins.deepSeq result result;
 }

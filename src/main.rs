@@ -119,16 +119,16 @@ async fn main() -> anyhow::Result<()> {
 }
 
 fn load_config(args: &Args) -> anyhow::Result<Config> {
-    let Some(config_path) = &args.config else {
-        return Ok(Config::default());
-    };
-
-    let path = Path::new(&config_path).canonicalize()?;
-    let config_file = path.join(".nix-tests.toml");
-    let file_config = if config_file.exists() {
-        Config::try_from(config_file)?
+    let file_config = if let Some(config_path) = &args.config {
+        let path = Path::new(&config_path).canonicalize()?;
+        let config_file = path.join(".nix-tests.toml");
+        if config_file.exists() {
+            Config::try_from(config_file)?
+        } else {
+            Config::search_in(&path)?.unwrap_or_default()
+        }
     } else {
-        Config::search_in(&path)?.unwrap_or_default()
+        Config::search()?.unwrap_or_default()
     };
 
     let config = args.config_args.apply_to(file_config);

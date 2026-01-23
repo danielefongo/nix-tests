@@ -36,17 +36,20 @@ pub mod config {
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
-pub struct TestSuiteReport(Vec<TestFileReport>);
+pub struct TestSuiteReport {
+    reports: Vec<TestFileReport>,
+    elapsed: u128,
+}
 
 impl TestSuiteReport {
-    pub fn new(reports: Vec<TestFileReport>) -> Self {
-        Self(reports)
+    pub fn new(reports: Vec<TestFileReport>, elapsed: u128) -> Self {
+        Self { reports, elapsed }
     }
     fn processed_files(&self) -> usize {
-        self.0.len()
+        self.reports.len()
     }
     fn succeeded_files(&self) -> usize {
-        self.0
+        self.reports
             .iter()
             .filter(|report| match report {
                 TestFileReport::Completed(report) => report.failed_count() == 0,
@@ -55,7 +58,7 @@ impl TestSuiteReport {
             .count()
     }
     fn failed_files(&self) -> usize {
-        self.0
+        self.reports
             .iter()
             .filter(|report| match report {
                 TestFileReport::Completed(report) => report.failed_count() > 0,
@@ -64,13 +67,16 @@ impl TestSuiteReport {
             .count()
     }
     fn errored_files(&self) -> usize {
-        self.0
+        self.reports
             .iter()
             .filter(|report| matches!(report, TestFileReport::Errored(_)))
             .count()
     }
+    fn total_elapsed(&self) -> u128 {
+        self.elapsed
+    }
     pub fn has_issues(&self) -> bool {
-        self.0.iter().any(|report| match report {
+        self.reports.iter().any(|report| match report {
             TestFileReport::Completed(report) => report.failed_count() > 0,
             TestFileReport::Errored(_) => true,
         })
@@ -89,11 +95,17 @@ pub struct TestFileCompletedReport {
     pub tests: Vec<TestReport>,
     #[serde(skip_deserializing, default)]
     pub file: String,
+    #[serde(skip_deserializing, default)]
+    pub elapsed: u128,
 }
 
 impl TestFileCompletedReport {
     pub fn with_file(mut self, file: String) -> Self {
         self.file = file;
+        self
+    }
+    pub fn with_elapsed(mut self, elapsed: u128) -> Self {
+        self.elapsed = elapsed;
         self
     }
     fn failed_count(&self) -> usize {
@@ -124,6 +136,7 @@ pub struct CheckReport {
 pub struct TestFileErroredReport {
     pub file: String,
     pub error: String,
+    pub elapsed: u128,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -156,7 +169,7 @@ impl HumanReporter {
     fn print_report(&self, result: &TestFileReport) {
         match result {
             TestFileReport::Completed(report) => {
-                println!("File: {}", report.file);
+                println!("File: {} ({}ms)", report.file, report.elapsed);
 
                 for test in &report.tests {
                     let path = test.path.join(" -> ");
@@ -185,7 +198,7 @@ impl HumanReporter {
                 println!();
             }
             TestFileReport::Errored(report) => {
-                println!("File: {}", report.file);
+                println!("File: {} ({}ms)", report.file, report.elapsed);
                 println!("ERROR: {}", report.error);
             }
         }
@@ -208,7 +221,7 @@ impl Reporter for HumanReporter {
                 if report.processed_files() == 0 {
                     println!("No test files found");
                 } else if report.failed_files() == 0 && report.errored_files() == 0 {
-                    println!("All tests passed");
+                    println!("All tests passed ({}ms)", report.total_elapsed());
                 } else {
                     println!("{} file(s) succeeded", report.succeeded_files());
                     if report.errored_files() > 0 {
@@ -217,6 +230,7 @@ impl Reporter for HumanReporter {
                     if report.failed_files() > 0 {
                         println!("{} file(s) failed", report.failed_files());
                     }
+                    println!("Total time: {}ms", report.total_elapsed());
                 }
             }
         }
@@ -251,14 +265,17 @@ mod test_suite_report_tests {
 
     #[test]
     fn it_counts_files() {
-        let report = TestSuiteReport::new(vec![
-            succeded_test_file(),
-            succeded_test_file(),
-            errored_test_file(),
-            errored_test_file(),
-            errored_test_file(),
-            failed_test_file(),
-        ]);
+        let report = TestSuiteReport::new(
+            vec![
+                succeded_test_file(),
+                succeded_test_file(),
+                errored_test_file(),
+                errored_test_file(),
+                errored_test_file(),
+                failed_test_file(),
+            ],
+            0,
+        );
 
         check!(report.processed_files() == 6);
         check!(report.succeeded_files() == 2);
@@ -268,7 +285,7 @@ mod test_suite_report_tests {
 
     #[test]
     fn it_handles_empty_report() {
-        let report = TestSuiteReport::new(vec![]);
+        let report = TestSuiteReport::new(vec![], 0);
 
         check!(report.processed_files() == 0);
         check!(report.succeeded_files() == 0);
@@ -279,21 +296,21 @@ mod test_suite_report_tests {
 
     #[test]
     fn it_has_no_issues_when_all_tests_pass() {
-        let report = TestSuiteReport::new(vec![succeded_test_file(), succeded_test_file()]);
+        let report = TestSuiteReport::new(vec![succeded_test_file(), succeded_test_file()], 0);
 
         check!(report.has_issues() == false);
     }
 
     #[test]
     fn it_has_issues_when_at_least_one_file_failed() {
-        let report = TestSuiteReport::new(vec![succeded_test_file(), failed_test_file()]);
+        let report = TestSuiteReport::new(vec![succeded_test_file(), failed_test_file()], 0);
 
         check!(report.has_issues());
     }
 
     #[test]
     fn it_has_issues_when_at_least_one_file_errored() {
-        let report = TestSuiteReport::new(vec![succeded_test_file(), errored_test_file()]);
+        let report = TestSuiteReport::new(vec![succeded_test_file(), errored_test_file()], 0);
 
         check!(report.has_issues());
     }
@@ -302,6 +319,7 @@ mod test_suite_report_tests {
         TestFileReport::Completed(TestFileCompletedReport {
             tests: vec![],
             file: "file".to_string(),
+            elapsed: 0,
         })
     }
 
@@ -309,6 +327,7 @@ mod test_suite_report_tests {
         TestFileReport::Completed(TestFileCompletedReport {
             tests: vec![failed_test_report()],
             file: "file".to_string(),
+            elapsed: 0,
         })
     }
 
@@ -316,6 +335,7 @@ mod test_suite_report_tests {
         TestFileReport::Errored(TestFileErroredReport {
             file: "file".to_string(),
             error: "error".to_string(),
+            elapsed: 0,
         })
     }
 

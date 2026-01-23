@@ -1,4 +1,4 @@
-use std::{env, future::Future, sync::Arc};
+use std::{env, future::Future, sync::Arc, time::Instant};
 
 use futures::{stream, StreamExt};
 use tokio::process::Command;
@@ -82,6 +82,8 @@ impl NixTestRunner {
 
 impl TestFileRunner for NixTestRunner {
     async fn run(&self, test_file: String) -> TestFileReport {
+        let start = Instant::now();
+
         let nix_tests = format!("import {} {{}}", self.nix_tests_path);
 
         let output = Command::new("nix-instantiate")
@@ -91,23 +93,30 @@ impl TestFileRunner for NixTestRunner {
             .output()
             .await;
 
+        let elapsed = start.elapsed().as_millis();
+
         match output {
             Ok(output) if output.status.success() => {
                 match serde_json::from_slice::<TestFileCompletedReport>(&output.stdout) {
-                    Ok(report) => TestFileReport::Completed(report.with_file(test_file)),
+                    Ok(report) => {
+                        TestFileReport::Completed(report.with_file(test_file).with_elapsed(elapsed))
+                    }
                     Err(e) => TestFileReport::Errored(TestFileErroredReport {
                         file: test_file,
                         error: format!("Failed to deserialize test report: {}", e),
+                        elapsed,
                     }),
                 }
             }
             Ok(output) => TestFileReport::Errored(TestFileErroredReport {
                 file: test_file,
                 error: String::from_utf8_lossy(&output.stderr).to_string(),
+                elapsed,
             }),
             Err(e) => TestFileReport::Errored(TestFileErroredReport {
                 file: test_file,
                 error: format!("Failed to execute nix-instantiate: {}", e),
+                elapsed,
             }),
         }
     }
@@ -133,6 +142,8 @@ where
     }
 
     pub async fn run(&self, test_files: &[TestFile]) -> TestSuiteReport {
+        let start = std::time::Instant::now();
+
         let file_reports: Vec<TestFileReport> = stream::iter(test_files)
             .filter_map(|tf| async move {
                 match tf {
@@ -161,7 +172,8 @@ where
             .collect()
             .await;
 
-        let suite_report = TestSuiteReport::new(file_reports);
+        let elapsed = start.elapsed().as_millis();
+        let suite_report = TestSuiteReport::new(file_reports, elapsed);
 
         self.reporter
             .on(&ReportEvent::TestSuiteCompleted(suite_report.clone()));
@@ -197,6 +209,7 @@ mod test_suite_runner_tests {
                     TestFileReport::Completed(TestFileCompletedReport {
                         file: "my_test.nix".to_string(),
                         tests: vec![],
+                        elapsed: 0,
                     })
                 }
                 .boxed()
@@ -213,6 +226,7 @@ mod test_suite_runner_tests {
                 TestFileCompletedReport {
                     file: "my_test.nix".to_string(),
                     tests: vec![],
+                    elapsed: 0,
                 },
             ))))
             .returning(|_event| {});
@@ -224,7 +238,9 @@ mod test_suite_runner_tests {
                 vec![TestFileReport::Completed(TestFileCompletedReport {
                     file: "my_test.nix".to_string(),
                     tests: vec![],
+                    elapsed: 0,
                 })],
+                0,
             ))))
             .returning(|_event| {});
 
@@ -260,6 +276,7 @@ mod test_suite_runner_tests {
             .in_sequence(&mut sequence)
             .with(eq(ReportEvent::TestSuiteCompleted(TestSuiteReport::new(
                 vec![],
+                0,
             ))))
             .returning(|_event| {});
 
@@ -282,7 +299,7 @@ mod runner_tests {
     use tempfile::NamedTempFile;
 
     use super::*;
-    use crate::reports::{CheckReport, TestFileCompletedReport, TestFileReport, TestReport};
+    use crate::reports::{CheckReport, TestFileReport, TestReport};
 
     fn create_temp_nix_file(content: &str) -> (NamedTempFile, String) {
         let mut file = NamedTempFile::new().unwrap();
@@ -331,40 +348,40 @@ in
 
         let report = NixTestRunner::new().run(path.clone()).await;
 
+        let_assert!(TestFileReport::Completed(file_report) = report);
+        check!(file_report.file == path);
+        check!(file_report.elapsed > 0);
         check!(
-            report
-                == TestFileReport::Completed(TestFileCompletedReport {
-                    file: path.clone(),
-                    tests: vec![
-                        TestReport {
-                            success: true,
-                            path: vec!["success".to_string()],
-                            location: format!("{}:17", path),
-                            checks: vec![
-                                CheckReport {
-                                    name: "number equals 42".to_string(),
-                                    success: true,
-                                    failure: None,
-                                },
-                                CheckReport {
-                                    name: "number is even".to_string(),
-                                    success: true,
-                                    failure: None,
-                                },
-                            ]
-                        },
-                        TestReport {
+            file_report.tests
+                == vec![
+                    TestReport {
+                        success: true,
+                        path: vec!["success".to_string()],
+                        location: format!("{}:17", path),
+                        checks: vec![
+                            CheckReport {
+                                name: "number equals 42".to_string(),
+                                success: true,
+                                failure: None,
+                            },
+                            CheckReport {
+                                name: "number is even".to_string(),
+                                success: true,
+                                failure: None,
+                            },
+                        ]
+                    },
+                    TestReport {
+                        success: false,
+                        path: vec!["failure".to_string()],
+                        location: format!("{}:25", path),
+                        checks: vec![CheckReport {
+                            name: "failed check".to_string(),
                             success: false,
-                            path: vec!["failure".to_string()],
-                            location: format!("{}:25", path),
-                            checks: vec![CheckReport {
-                                name: "failed check".to_string(),
-                                success: false,
-                                failure: Some("Expected: true\nGot: false".to_string()),
-                            }]
-                        }
-                    ],
-                })
+                            failure: Some("Expected: true\nGot: false".to_string()),
+                        }]
+                    }
+                ]
         );
     }
 
@@ -406,43 +423,43 @@ in
 
         let report = NixTestRunner::new().run(path.clone()).await;
 
+        let_assert!(TestFileReport::Completed(file_report) = report);
+        check!(file_report.file == path);
+        check!(file_report.elapsed > 0);
         check!(
-            report
-                == TestFileReport::Completed(TestFileCompletedReport {
-                    file: path.clone(),
-                    tests: vec![
-                        TestReport {
+            file_report.tests
+                == vec![
+                    TestReport {
+                        success: true,
+                        path: vec!["group 1".to_string(), "test 1".to_string()],
+                        location: format!("{}:10", path),
+                        checks: vec![CheckReport {
+                            name: "check 1".to_string(),
                             success: true,
-                            path: vec!["group 1".to_string(), "test 1".to_string()],
-                            location: format!("{}:10", path),
-                            checks: vec![CheckReport {
-                                name: "check 1".to_string(),
-                                success: true,
-                                failure: None,
-                            },]
-                        },
-                        TestReport {
+                            failure: None,
+                        },]
+                    },
+                    TestReport {
+                        success: true,
+                        path: vec!["group 1".to_string(), "test 2".to_string()],
+                        location: format!("{}:16", path),
+                        checks: vec![CheckReport {
+                            name: "check 2".to_string(),
                             success: true,
-                            path: vec!["group 1".to_string(), "test 2".to_string()],
-                            location: format!("{}:16", path),
-                            checks: vec![CheckReport {
-                                name: "check 2".to_string(),
-                                success: true,
-                                failure: None,
-                            },]
-                        },
-                        TestReport {
+                            failure: None,
+                        },]
+                    },
+                    TestReport {
+                        success: true,
+                        path: vec!["group 2".to_string(), "test 3".to_string()],
+                        location: format!("{}:24", path),
+                        checks: vec![CheckReport {
+                            name: "check 3".to_string(),
                             success: true,
-                            path: vec!["group 2".to_string(), "test 3".to_string()],
-                            location: format!("{}:24", path),
-                            checks: vec![CheckReport {
-                                name: "check 3".to_string(),
-                                success: true,
-                                failure: None,
-                            },]
-                        }
-                    ],
-                })
+                            failure: None,
+                        },]
+                    }
+                ]
         );
     }
 
@@ -452,9 +469,10 @@ in
 
         let report = NixTestRunner::new().run(path.clone()).await;
 
-        let_assert!(TestFileReport::Errored(TestFileErroredReport { file, error }) = report);
-        check!(file == path);
-        check!(error.contains("error:"));
+        let_assert!(TestFileReport::Errored(file_report) = report);
+        check!(file_report.file == path);
+        check!(file_report.error.contains("error:"));
+        check!(file_report.elapsed > 0);
     }
 
     #[tokio::test]
@@ -475,9 +493,12 @@ in
 
         let report = NixTestRunner::new().run(path.clone()).await;
 
-        let_assert!(TestFileReport::Errored(TestFileErroredReport { file, error }) = report);
-        check!(file == path);
-        check!(error.contains("Failed to deserialize test report"));
+        let_assert!(TestFileReport::Errored(file_report) = report);
+        check!(file_report.file == path);
+        check!(file_report.elapsed > 0);
+        check!(file_report
+            .error
+            .contains("Failed to deserialize test report"));
     }
 
     #[tokio::test]
@@ -485,8 +506,11 @@ in
         let invalid_path = "test\0file.nix".to_string();
         let report = NixTestRunner::new().run(invalid_path.clone()).await;
 
-        let_assert!(TestFileReport::Errored(TestFileErroredReport { file, error }) = report);
-        check!(file == invalid_path);
-        check!(error.contains("Failed to execute nix-instantiate"));
+        let_assert!(TestFileReport::Errored(file_report) = report);
+        check!(file_report.file == invalid_path);
+        check!(file_report.elapsed >= 0);
+        check!(file_report
+            .error
+            .contains("Failed to execute nix-instantiate"));
     }
 }

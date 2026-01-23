@@ -149,7 +149,8 @@ You can create a `.nix-tests.toml` file in your project. Use `nix-tests --show` 
 
 ## Limitations
 
-When a test fails, the error pointer indicates the entire `checks` block rather than the specific individual check that failed.
+- **Error Location Precision**: When a test fails, the error pointer indicates the entire `checks` block rather than the specific individual check that failed. This is a fundamental limitation of Nix's `unsafeGetAttrPos`.
+- **Execution Time Granularity**: Execution time (`elapsed`) can only be measured at the file level, not for individual tests. This is because all tests in a file are evaluated together by a single `nix-instantiate` process, and timing is measured externally.
 
 ## API
 
@@ -177,7 +178,7 @@ All available via `helpers` parameter in `checks`:
 Create custom checks using the `helpers.check` function or by defining check functions that return `true` for success or an error message string for failure:
 
 ```nix
-# Custom assertions examples
+# Custom checks examples
 isEven = x: if lib.mod x 2 == 0 then true else "${builtins.toString x} is not even";
 longerThan = n: s: if builtins.stringLength s > n then true else "'${s}' is not longer than ${toString n}";
 

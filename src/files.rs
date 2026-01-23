@@ -90,7 +90,12 @@ impl SearchTestFiles for RgSearchTestFiles {
         path: &Path,
     ) -> Result<Box<dyn Iterator<Item = String>>, anyhow::Error> {
         let output = Command::new("rg")
-            .args(["--files", "--glob", "*_test.nix", path.to_str().unwrap()])
+            .args([
+                "--files",
+                "--glob",
+                "*_test.nix",
+                path.to_string_lossy().as_ref(),
+            ])
             .output()?;
 
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
@@ -112,7 +117,13 @@ impl SearchTestFiles for FindSearchTestFiles {
         path: &Path,
     ) -> Result<Box<dyn Iterator<Item = String>>, anyhow::Error> {
         let output = Command::new("find")
-            .args([path.to_str().unwrap(), "-name", "*_test.nix", "-type", "f"])
+            .args([
+                path.to_string_lossy().as_ref(),
+                "-name",
+                "*_test.nix",
+                "-type",
+                "f",
+            ])
             .output()?;
 
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();

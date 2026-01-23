@@ -84,15 +84,6 @@ pub enum TestFileReport {
     Errored(TestFileErroredReport),
 }
 
-impl TestFileReport {
-    fn file(&self) -> &str {
-        match self {
-            TestFileReport::Completed(report) => &report.file,
-            TestFileReport::Errored(error) => &error.file,
-        }
-    }
-}
-
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct TestFileCompletedReport {
     pub tests: Vec<TestReport>,
@@ -165,7 +156,7 @@ impl HumanReporter {
     fn print_report(&self, result: &TestFileReport) {
         match result {
             TestFileReport::Completed(report) => {
-                println!("Testing: {}", report.file);
+                println!("File: {}", report.file);
 
                 for test in &report.tests {
                     let path = test.path.join(" -> ");
@@ -187,19 +178,16 @@ impl HumanReporter {
                         }
                     }
                 }
-            }
-            TestFileReport::Errored(_) => {}
-        }
 
-        match result {
-            TestFileReport::Completed(report) => {
-                if report.failed_count() == 0 {
-                    println!("PASSED\n")
-                } else {
-                    println!("FAILED ({} failed)\n", report.failed_count())
+                if report.failed_count() > 0 {
+                    println!("FAILED ({} failed)", report.failed_count())
                 }
+                println!();
             }
-            TestFileReport::Errored(err) => println!("ERROR in {}\n{}", result.file(), err.error),
+            TestFileReport::Errored(report) => {
+                println!("File: {}", report.file);
+                println!("ERROR: {}", report.error);
+            }
         }
     }
 }

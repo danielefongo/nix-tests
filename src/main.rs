@@ -31,21 +31,55 @@ impl From<Format> for report_config::Format {
     }
 }
 
-#[derive(Debug, ClapArgs, Clone)]
-pub struct ConfigArgs {
+#[derive(Default, Debug, ClapArgs, Clone)]
+#[command(next_help_heading = "[runner] options")]
+pub struct RunnerArgs {
     #[arg(
         long,
         help = "Number of threads to use for running tests (1-1024, default: number of CPU cores)",
         value_parser = clap::builder::RangedU64ValueParser::<usize>::new().range(1..=1024)
     )]
     num_threads: Option<usize>,
+}
+
+#[derive(Default, Debug, ClapArgs, Clone)]
+#[command(next_help_heading = "[report] options")]
+pub struct ReportArgs {
+    #[arg(long, value_enum, help = "Output format for test results")]
+    format: Option<Format>,
 
     #[arg(
         long,
-        value_enum,
-        help = "Output format for test results (under [report])"
+        help = "Hide individual reports for succeeded test files",
+        value_name = "BOOL",
+        default_missing_value = "true"
     )]
-    format: Option<Format>,
+    hide_succeeded: Option<bool>,
+
+    #[arg(
+        long,
+        help = "Hide individual reports for failed test files",
+        value_name = "BOOL",
+        default_missing_value = "true"
+    )]
+    hide_failed: Option<bool>,
+
+    #[arg(
+        long,
+        help = "Hide individual reports for errored test files",
+        value_name = "BOOL",
+        default_missing_value = "true"
+    )]
+    hide_errored: Option<bool>,
+}
+
+#[derive(Default, Debug, ClapArgs, Clone)]
+pub struct ConfigArgs {
+    #[command(flatten)]
+    runner: RunnerArgs,
+
+    #[command(flatten)]
+    report: ReportArgs,
 }
 
 impl ConfigArgs {
@@ -53,16 +87,24 @@ impl ConfigArgs {
         Config {
             runner: runner_config::Config {
                 num_threads: self
+                    .runner
                     .num_threads
                     .map(Into::into)
                     .unwrap_or(base.runner.num_threads),
             },
             report: report_config::Config {
                 format: self
+                    .report
                     .format
                     .clone()
                     .map(Into::into)
                     .unwrap_or(base.report.format),
+                hide_succeeded: self
+                    .report
+                    .hide_succeeded
+                    .unwrap_or(base.report.hide_succeeded),
+                hide_failed: self.report.hide_failed.unwrap_or(base.report.hide_failed),
+                hide_errored: self.report.hide_errored.unwrap_or(base.report.hide_errored),
             },
         }
     }
@@ -80,14 +122,14 @@ struct Args {
     #[arg(long, help = "Path to the configuration directory or file")]
     config: Option<String>,
 
+    #[arg(long, help = "Show the loaded config and exit")]
+    show: bool,
+
     #[command(flatten)]
     config_args: ConfigArgs,
 
     #[arg(default_value = ".", num_args = 0..)]
     paths: Vec<String>,
-
-    #[arg(long, help = "Show the loaded config and exit")]
-    show: bool,
 }
 
 #[tokio::main]
@@ -163,7 +205,7 @@ mod config_args_tests {
 
     use crate::{
         config::Config, reports::config as report_config, runners::config as runner_config,
-        ConfigArgs, Format,
+        ConfigArgs, Format, ReportArgs, RunnerArgs,
     };
 
     #[test]
@@ -174,12 +216,17 @@ mod config_args_tests {
             },
             report: report_config::Config {
                 format: report_config::Format::Human,
+                hide_succeeded: false,
+                hide_failed: false,
+                hide_errored: false,
             },
         };
 
         let args = ConfigArgs {
-            num_threads: Some(4),
-            format: None,
+            runner: RunnerArgs {
+                num_threads: Some(4),
+            },
+            ..Default::default()
         };
 
         let merged = args.apply_to(file_config);
@@ -191,6 +238,9 @@ mod config_args_tests {
                     },
                     report: report_config::Config {
                         format: report_config::Format::Human,
+                        hide_succeeded: false,
+                        hide_failed: false,
+                        hide_errored: false,
                     }
                 }
         );
@@ -204,13 +254,13 @@ mod config_args_tests {
             },
             report: report_config::Config {
                 format: report_config::Format::Json,
+                hide_succeeded: false,
+                hide_failed: false,
+                hide_errored: false,
             },
         };
 
-        let args = ConfigArgs {
-            num_threads: None,
-            format: None,
-        };
+        let args = ConfigArgs::default();
 
         let merged = args.apply_to(file_config.clone());
         check!(merged == file_config);
@@ -224,12 +274,22 @@ mod config_args_tests {
             },
             report: report_config::Config {
                 format: report_config::Format::Human,
+                hide_succeeded: false,
+                hide_failed: false,
+                hide_errored: false,
             },
         };
 
         let args = ConfigArgs {
-            num_threads: Some(12),
-            format: Some(Format::Json),
+            runner: RunnerArgs {
+                num_threads: Some(12),
+            },
+            report: ReportArgs {
+                format: Some(Format::Json),
+                hide_succeeded: Some(true),
+                hide_failed: Some(false),
+                hide_errored: Some(true),
+            },
         };
 
         let merged = args.apply_to(file_config);
@@ -241,6 +301,9 @@ mod config_args_tests {
                     },
                     report: report_config::Config {
                         format: report_config::Format::Json,
+                        hide_succeeded: true,
+                        hide_failed: false,
+                        hide_errored: true,
                     }
                 }
         );

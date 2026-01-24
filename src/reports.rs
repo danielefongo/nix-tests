@@ -5,23 +5,30 @@ use crate::reports::config::Format;
 pub mod config {
     use serde::{Deserialize, Serialize};
 
-    #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+    use crate::reports::TestFileReport;
+
+    #[derive(Default, Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
     #[serde(rename_all = "kebab-case")]
     pub struct Config {
         #[serde(default)]
         pub format: Format,
+
+        #[serde(default)]
+        pub hide_succeeded: bool,
+
+        #[serde(default)]
+        pub hide_failed: bool,
+
+        #[serde(default)]
+        pub hide_errored: bool,
     }
 
     impl Config {
-        fn default_format() -> Format {
-            Format::Human
-        }
-    }
-
-    impl Default for Config {
-        fn default() -> Self {
-            Self {
-                format: Self::default_format(),
+        pub fn should_hide_test_report(&self, report: &TestFileReport) -> bool {
+            match report {
+                TestFileReport::Completed(r) if r.failed_count() == 0 => self.hide_succeeded,
+                TestFileReport::Completed(_) => self.hide_failed,
+                TestFileReport::Errored(_) => self.hide_errored,
             }
         }
     }
@@ -30,8 +37,8 @@ pub mod config {
     #[serde(rename_all = "kebab-case")]
     pub enum Format {
         #[default]
-        Json,
         Human,
+        Json,
     }
 }
 
@@ -144,7 +151,7 @@ pub struct TestFileErroredReport {
 pub enum ReportEvent {
     TestFileNotFound(String),
     TestFileInvalid(String),
-    TestCompleted(TestFileReport),
+    TestFileCompleted(TestFileReport),
     TestSuiteCompleted(TestSuiteReport),
 }
 
@@ -153,21 +160,39 @@ pub trait Reporter {
     fn on(&self, report_event: &ReportEvent) -> Option<String>;
 }
 
-pub struct JsonReporter;
+pub struct JsonReporter {
+    config: config::Config,
+}
+
+impl JsonReporter {
+    pub fn new(config: config::Config) -> Self {
+        Self { config }
+    }
+}
 
 impl Reporter for JsonReporter {
     fn on(&self, report_event: &ReportEvent) -> Option<String> {
-        if let ReportEvent::TestCompleted(report) = report_event {
-            Some(serde_json::to_string(report).unwrap())
+        if let ReportEvent::TestFileCompleted(report) = report_event {
+            if self.config.should_hide_test_report(report) {
+                None
+            } else {
+                Some(serde_json::to_string(report).unwrap())
+            }
         } else {
             None
         }
     }
 }
 
-pub struct HumanReporter;
+pub struct HumanReporter {
+    config: config::Config,
+}
 
 impl HumanReporter {
+    pub fn new(config: config::Config) -> Self {
+        Self { config }
+    }
+
     fn format_report(&self, result: &TestFileReport) -> String {
         let mut output = String::new();
 
@@ -220,7 +245,13 @@ impl Reporter for HumanReporter {
             ReportEvent::TestFileInvalid(path) => {
                 Some(format!("Warning: '{path}' is not a test file, skipping.\n"))
             }
-            ReportEvent::TestCompleted(report) => Some(self.format_report(report)),
+            ReportEvent::TestFileCompleted(report) => {
+                if self.config.should_hide_test_report(report) {
+                    None
+                } else {
+                    Some(self.format_report(report))
+                }
+            }
             ReportEvent::TestSuiteCompleted(report) => {
                 let mut output = String::new();
 
@@ -256,8 +287,8 @@ pub struct ConfigurableReporter {
 impl ConfigurableReporter {
     pub fn new(report_config: &config::Config) -> Self {
         let inner: Box<dyn Reporter + Send + Sync> = match report_config.format {
-            Format::Human => Box::new(HumanReporter),
-            Format::Json => Box::new(JsonReporter),
+            Format::Human => Box::new(HumanReporter::new(report_config.clone())),
+            Format::Json => Box::new(JsonReporter::new(report_config.clone())),
         };
         Self { inner }
     }
@@ -366,13 +397,15 @@ mod test_suite_report_tests {
 mod human_reporter_tests {
     use assert2::check;
 
+    use crate::reports::config::Config;
+
     use super::test_helpers::*;
     use super::*;
 
     #[test]
     fn it_reports_errored_test_file() {
-        let reporter = HumanReporter;
-        let event = ReportEvent::TestCompleted(errored_test_file(
+        let reporter = HumanReporter::new(Config::default());
+        let event = ReportEvent::TestFileCompleted(errored_test_file(
             "broken.nix",
             "Syntax error at line 5\n",
             50,
@@ -390,7 +423,7 @@ ERROR: Syntax error at line 5
 
     #[test]
     fn it_reports_test_file_invalid() {
-        let reporter = HumanReporter;
+        let reporter = HumanReporter::new(Config::default());
         let event = ReportEvent::TestFileInvalid("invalid.nix".to_string());
 
         check!(
@@ -401,8 +434,8 @@ ERROR: Syntax error at line 5
 
     #[test]
     fn it_reports_completed_test_with_failures() {
-        let reporter = HumanReporter;
-        let event = ReportEvent::TestCompleted(completed_test_file(
+        let reporter = HumanReporter::new(Config::default());
+        let event = ReportEvent::TestFileCompleted(completed_test_file(
             "test.nix",
             150,
             vec![failed_test_report(
@@ -431,8 +464,8 @@ FAILED (1 failed)
 
     #[test]
     fn it_reports_completed_test_with_failure_without_message() {
-        let reporter = HumanReporter;
-        let event = ReportEvent::TestCompleted(completed_test_file(
+        let reporter = HumanReporter::new(Config::default());
+        let event = ReportEvent::TestFileCompleted(completed_test_file(
             "test.nix",
             75,
             vec![failed_test_report(
@@ -456,7 +489,7 @@ FAILED (1 failed)
 
     #[test]
     fn it_reports_test_suite_completed_with_no_files() {
-        let reporter = HumanReporter;
+        let reporter = HumanReporter::new(Config::default());
         let event = ReportEvent::TestSuiteCompleted(test_suite_report(vec![], 0));
 
         check!(
@@ -469,7 +502,7 @@ No test files found
 
     #[test]
     fn it_reports_test_suite_completed_all_passing() {
-        let reporter = HumanReporter;
+        let reporter = HumanReporter::new(Config::default());
         let event = ReportEvent::TestSuiteCompleted(test_suite_report(
             vec![completed_test_file("test1.nix", 50, vec![])],
             100,
@@ -485,7 +518,7 @@ All tests passed (100ms)
 
     #[test]
     fn it_reports_test_suite_completed_with_failures() {
-        let reporter = HumanReporter;
+        let reporter = HumanReporter::new(Config::default());
         let event = ReportEvent::TestSuiteCompleted(test_suite_report(
             vec![
                 completed_test_file("test1.nix", 50, vec![]),
@@ -514,7 +547,7 @@ Total time: 200ms
 
     #[test]
     fn it_reports_test_suite_completed_with_errors() {
-        let reporter = HumanReporter;
+        let reporter = HumanReporter::new(Config::default());
         let event = ReportEvent::TestSuiteCompleted(test_suite_report(
             vec![
                 completed_test_file("test1.nix", 50, vec![]),
@@ -535,7 +568,7 @@ Total time: 150ms
 
     #[test]
     fn it_reports_test_suite_completed_with_mixed_results() {
-        let reporter = HumanReporter;
+        let reporter = HumanReporter::new(Config::default());
         let event = ReportEvent::TestSuiteCompleted(test_suite_report(
             vec![
                 completed_test_file("passing.nix", 30, vec![]),
@@ -562,6 +595,182 @@ Total time: 150ms
 Total time: 250ms
 "
         );
+    }
+
+    #[test]
+    fn it_hides_succeeded_test_files_when_flag_is_set() {
+        let config = config::Config {
+            format: Format::Human,
+            hide_succeeded: true,
+            hide_failed: false,
+            hide_errored: false,
+        };
+        let reporter = HumanReporter::new(config);
+        let event = ReportEvent::TestFileCompleted(completed_test_file("test.nix", 50, vec![]));
+
+        check!(reporter.on(&event).is_none());
+    }
+
+    #[test]
+    fn it_hides_failed_test_files_when_flag_is_set() {
+        let config = config::Config {
+            format: Format::Human,
+            hide_succeeded: false,
+            hide_failed: true,
+            hide_errored: false,
+        };
+        let reporter = HumanReporter::new(config);
+        let event = ReportEvent::TestFileCompleted(completed_test_file(
+            "test.nix",
+            75,
+            vec![failed_test_report(
+                vec!["test"],
+                "test.nix:1",
+                vec![failed_check_report("check")],
+            )],
+        ));
+
+        check!(reporter.on(&event).is_none());
+    }
+
+    #[test]
+    fn it_hides_errored_test_files_when_flag_is_set() {
+        let config = config::Config {
+            format: Format::Human,
+            hide_succeeded: false,
+            hide_failed: false,
+            hide_errored: true,
+        };
+        let reporter = HumanReporter::new(config);
+        let event = ReportEvent::TestFileCompleted(errored_test_file("broken.nix", "error", 25));
+
+        check!(reporter.on(&event).is_none());
+    }
+
+    #[test]
+    fn it_always_shows_test_suite_summary_regardless_of_hide_flags() {
+        let config = config::Config {
+            format: Format::Human,
+            hide_succeeded: true,
+            hide_failed: true,
+            hide_errored: true,
+        };
+        let reporter = HumanReporter::new(config);
+        let event = ReportEvent::TestSuiteCompleted(test_suite_report(
+            vec![
+                completed_test_file("passing.nix", 30, vec![]),
+                completed_test_file(
+                    "failing.nix",
+                    40,
+                    vec![failed_test_report(
+                        vec!["test"],
+                        "failing.nix:1",
+                        vec![failed_check_report("check")],
+                    )],
+                ),
+                errored_test_file("broken.nix", "error", 20),
+            ],
+            250,
+        ));
+
+        let output = reporter.on(&event).unwrap();
+        check!(output.contains("1 file(s) succeeded"));
+        check!(output.contains("1 file(s) had errors"));
+        check!(output.contains("1 file(s) failed"));
+        check!(output.contains("Total time: 250ms"));
+    }
+}
+
+#[cfg(test)]
+mod json_reporter_tests {
+    use assert2::check;
+
+    use crate::reports::config::Config;
+
+    use super::test_helpers::*;
+    use super::*;
+
+    #[test]
+    fn it_returns_json_for_completed_test_file() {
+        let reporter = JsonReporter::new(Config::default());
+        let report = completed_test_file("test.nix", 50, vec![]);
+        let event = ReportEvent::TestFileCompleted(report.clone());
+
+        let output = reporter.on(&event).unwrap();
+        check!(serde_json::from_str::<serde_json::Value>(&output).is_ok());
+        check!(output.contains("\"file\":\"test.nix\""));
+    }
+
+    #[test]
+    fn it_returns_none_for_non_test_file_completed_events() {
+        let reporter = JsonReporter::new(Config::default());
+        let event = ReportEvent::TestFileNotFound("test.nix".to_string());
+
+        check!(reporter.on(&event).is_none());
+    }
+
+    #[test]
+    fn it_hides_succeeded_test_files_when_flag_is_set() {
+        let config = config::Config {
+            format: Format::Json,
+            hide_succeeded: true,
+            hide_failed: false,
+            hide_errored: false,
+        };
+        let reporter = JsonReporter::new(config);
+        let event = ReportEvent::TestFileCompleted(completed_test_file("test.nix", 50, vec![]));
+
+        check!(reporter.on(&event).is_none());
+    }
+
+    #[test]
+    fn it_hides_failed_test_files_when_flag_is_set() {
+        let config = config::Config {
+            format: Format::Json,
+            hide_succeeded: false,
+            hide_failed: true,
+            hide_errored: false,
+        };
+        let reporter = JsonReporter::new(config);
+        let event = ReportEvent::TestFileCompleted(completed_test_file(
+            "test.nix",
+            75,
+            vec![failed_test_report(
+                vec!["test"],
+                "test.nix:1",
+                vec![failed_check_report("check")],
+            )],
+        ));
+
+        check!(reporter.on(&event).is_none());
+    }
+
+    #[test]
+    fn it_hides_errored_test_files_when_flag_is_set() {
+        let config = config::Config {
+            format: Format::Json,
+            hide_succeeded: false,
+            hide_failed: false,
+            hide_errored: true,
+        };
+        let reporter = JsonReporter::new(config);
+        let event = ReportEvent::TestFileCompleted(errored_test_file("broken.nix", "error", 25));
+
+        check!(reporter.on(&event).is_none());
+    }
+
+    #[test]
+    fn it_shows_succeeded_test_files_when_hide_flag_is_false() {
+        let config = config::Config {
+            format: Format::Json,
+            hide_succeeded: false,
+            hide_failed: true,
+            hide_errored: true,
+        };
+        let reporter = JsonReporter::new(config);
+        let event = ReportEvent::TestFileCompleted(completed_test_file("test.nix", 50, vec![]));
+
+        check!(reporter.on(&event).is_some());
     }
 }
 

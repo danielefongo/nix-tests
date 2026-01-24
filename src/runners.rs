@@ -161,7 +161,7 @@ where
             })
             .buffer_unordered(self.config.num_threads.get())
             .inspect(|report| {
-                self.report(&ReportEvent::TestCompleted(report.clone()));
+                self.report(&ReportEvent::TestFileCompleted(report.clone()));
             })
             .collect()
             .await;
@@ -221,13 +221,13 @@ mod test_suite_runner_tests {
             .expect_on()
             .in_sequence(&mut sequence)
             .once()
-            .with(eq(ReportEvent::TestCompleted(TestFileReport::Completed(
-                TestFileCompletedReport {
+            .with(eq(ReportEvent::TestFileCompleted(
+                TestFileReport::Completed(TestFileCompletedReport {
                     file: "my_test.nix".to_string(),
                     tests: vec![],
                     elapsed: 0,
-                },
-            ))))
+                }),
+            )))
             .returning(|_event| None);
         reporter
             .expect_on()

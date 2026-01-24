@@ -150,15 +150,17 @@ pub enum ReportEvent {
 
 #[cfg_attr(test, mockall::automock)]
 pub trait Reporter {
-    fn on(&self, report_event: &ReportEvent);
+    fn on(&self, report_event: &ReportEvent) -> Option<String>;
 }
 
 pub struct JsonReporter;
 
 impl Reporter for JsonReporter {
-    fn on(&self, report_event: &ReportEvent) {
+    fn on(&self, report_event: &ReportEvent) -> Option<String> {
         if let ReportEvent::TestCompleted(report) = report_event {
-            println!("{}", serde_json::to_string(report).unwrap());
+            Some(serde_json::to_string(report).unwrap())
+        } else {
+            None
         }
     }
 }
@@ -166,72 +168,82 @@ impl Reporter for JsonReporter {
 pub struct HumanReporter;
 
 impl HumanReporter {
-    fn print_report(&self, result: &TestFileReport) {
+    fn format_report(&self, result: &TestFileReport) -> String {
+        let mut output = String::new();
+
         match result {
             TestFileReport::Completed(report) => {
-                println!("File: {} ({}ms)", report.file, report.elapsed);
+                output.push_str(&format!("File: {} ({}ms)\n", report.file, report.elapsed));
 
                 for test in &report.tests {
                     let path = test.path.join(" -> ");
 
                     for check in &test.checks {
                         if check.success {
-                            println!("✓ {} -> {}", path, check.name);
+                            output.push_str(&format!("✓ {} -> {}\n", path, check.name));
                         } else {
-                            println!("✗ {} -> {}", path, check.name);
+                            output.push_str(&format!("✗ {} -> {}\n", path, check.name));
                             if let Some(failure) = &check.failure {
-                                println!("    Failure:");
+                                output.push_str("    Failure:\n");
                                 for line in failure.lines() {
-                                    println!("      {}", line);
+                                    output.push_str(&format!("      {}\n", line));
                                 }
-                                println!("      at {}", test.location);
+                                output.push_str(&format!("      at {}\n", test.location));
                             } else {
-                                println!("    Failed at {}", test.location);
+                                output.push_str(&format!("    Failed at {}\n", test.location));
                             }
                         }
                     }
                 }
 
                 if report.failed_count() > 0 {
-                    println!("FAILED ({} failed)", report.failed_count())
+                    output.push_str(&format!("FAILED ({} failed)\n", report.failed_count()));
                 }
-                println!();
+                output.push('\n');
             }
             TestFileReport::Errored(report) => {
-                println!("File: {} ({}ms)", report.file, report.elapsed);
-                println!("ERROR: {}", report.error);
+                output.push_str(&format!("File: {} ({}ms)\n", report.file, report.elapsed));
+                output.push_str(&format!("ERROR: {}\n", report.error));
             }
         }
+
+        output
     }
 }
 
 impl Reporter for HumanReporter {
-    fn on(&self, report_event: &ReportEvent) {
+    fn on(&self, report_event: &ReportEvent) -> Option<String> {
         match report_event {
             ReportEvent::TestFileNotFound(path) => {
-                eprintln!("Warning: '{}' is not found, skipping.\n", path);
+                Some(format!("Warning: '{path}' is not found, skipping.\n"))
             }
             ReportEvent::TestFileInvalid(path) => {
-                eprintln!("Warning: '{}' is not a test file, skipping.\n", path);
+                Some(format!("Warning: '{path}' is not a test file, skipping.\n"))
             }
-            ReportEvent::TestCompleted(report) => {
-                self.print_report(report);
-            }
+            ReportEvent::TestCompleted(report) => Some(self.format_report(report)),
             ReportEvent::TestSuiteCompleted(report) => {
+                let mut output = String::new();
+
                 if report.processed_files() == 0 {
-                    println!("No test files found");
+                    output.push_str("No test files found\n");
                 } else if report.failed_files() == 0 && report.errored_files() == 0 {
-                    println!("All tests passed ({}ms)", report.total_elapsed());
+                    output.push_str(&format!(
+                        "All tests passed ({}ms)\n",
+                        report.total_elapsed()
+                    ));
                 } else {
-                    println!("{} file(s) succeeded", report.succeeded_files());
+                    output.push_str(&format!("{} file(s) succeeded\n", report.succeeded_files()));
                     if report.errored_files() > 0 {
-                        println!("{} file(s) had errors", report.errored_files());
+                        output
+                            .push_str(&format!("{} file(s) had errors\n", report.errored_files()));
                     }
                     if report.failed_files() > 0 {
-                        println!("{} file(s) failed", report.failed_files());
+                        output.push_str(&format!("{} file(s) failed\n", report.failed_files()));
                     }
-                    println!("Total time: {}ms", report.total_elapsed());
+                    output.push_str(&format!("Total time: {}ms\n", report.total_elapsed()));
                 }
+
+                Some(output)
             }
         }
     }
@@ -252,8 +264,8 @@ impl ConfigurableReporter {
 }
 
 impl Reporter for ConfigurableReporter {
-    fn on(&self, report_event: &ReportEvent) {
-        self.inner.on(report_event);
+    fn on(&self, report_event: &ReportEvent) -> Option<String> {
+        self.inner.on(report_event)
     }
 }
 
@@ -261,18 +273,26 @@ impl Reporter for ConfigurableReporter {
 mod test_suite_report_tests {
     use assert2::check;
 
-    use super::*;
+    use super::test_helpers::*;
 
     #[test]
     fn it_counts_files() {
-        let report = TestSuiteReport::new(
+        let report = test_suite_report(
             vec![
-                succeded_test_file(),
-                succeded_test_file(),
-                errored_test_file(),
-                errored_test_file(),
-                errored_test_file(),
-                failed_test_file(),
+                completed_test_file("file1.nix", 0, vec![]),
+                completed_test_file("file2.nix", 0, vec![]),
+                errored_test_file("file3.nix", "error", 0),
+                errored_test_file("file4.nix", "error", 0),
+                errored_test_file("file5.nix", "error", 0),
+                completed_test_file(
+                    "file6.nix",
+                    0,
+                    vec![failed_test_report(
+                        vec!["test"],
+                        "file:1",
+                        vec![failed_check_report_with_message("check", "failed")],
+                    )],
+                ),
             ],
             0,
         );
@@ -285,7 +305,7 @@ mod test_suite_report_tests {
 
     #[test]
     fn it_handles_empty_report() {
-        let report = TestSuiteReport::new(vec![], 0);
+        let report = test_suite_report(vec![], 0);
 
         check!(report.processed_files() == 0);
         check!(report.succeeded_files() == 0);
@@ -296,63 +316,332 @@ mod test_suite_report_tests {
 
     #[test]
     fn it_has_no_issues_when_all_tests_pass() {
-        let report = TestSuiteReport::new(vec![succeded_test_file(), succeded_test_file()], 0);
+        let report = test_suite_report(
+            vec![
+                completed_test_file("file1.nix", 0, vec![]),
+                completed_test_file("file2.nix", 0, vec![]),
+            ],
+            0,
+        );
 
         check!(report.has_issues() == false);
     }
 
     #[test]
     fn it_has_issues_when_at_least_one_file_failed() {
-        let report = TestSuiteReport::new(vec![succeded_test_file(), failed_test_file()], 0);
+        let report = test_suite_report(
+            vec![
+                completed_test_file("file1.nix", 0, vec![]),
+                completed_test_file(
+                    "file2.nix",
+                    0,
+                    vec![failed_test_report(
+                        vec!["test"],
+                        "file:1",
+                        vec![failed_check_report_with_message("check", "failed")],
+                    )],
+                ),
+            ],
+            0,
+        );
 
         check!(report.has_issues());
     }
 
     #[test]
     fn it_has_issues_when_at_least_one_file_errored() {
-        let report = TestSuiteReport::new(vec![succeded_test_file(), errored_test_file()], 0);
+        let report = test_suite_report(
+            vec![
+                completed_test_file("file1.nix", 0, vec![]),
+                errored_test_file("file2.nix", "error", 0),
+            ],
+            0,
+        );
 
         check!(report.has_issues());
     }
+}
 
-    fn succeded_test_file() -> TestFileReport {
-        TestFileReport::Completed(TestFileCompletedReport {
-            tests: vec![],
-            file: "file".to_string(),
-            elapsed: 0,
-        })
+#[cfg(test)]
+mod human_reporter_tests {
+    use assert2::check;
+
+    use super::test_helpers::*;
+    use super::*;
+
+    #[test]
+    fn it_reports_errored_test_file() {
+        let reporter = HumanReporter;
+        let event = ReportEvent::TestCompleted(errored_test_file(
+            "broken.nix",
+            "Syntax error at line 5\n",
+            50,
+        ));
+
+        check!(
+            reporter.on(&event).unwrap()
+                == "\
+File: broken.nix (50ms)
+ERROR: Syntax error at line 5
+
+"
+        );
     }
 
-    fn failed_test_file() -> TestFileReport {
-        TestFileReport::Completed(TestFileCompletedReport {
-            tests: vec![failed_test_report()],
-            file: "file".to_string(),
-            elapsed: 0,
-        })
+    #[test]
+    fn it_reports_test_file_invalid() {
+        let reporter = HumanReporter;
+        let event = ReportEvent::TestFileInvalid("invalid.nix".to_string());
+
+        check!(
+            reporter.on(&event).unwrap()
+                == "Warning: 'invalid.nix' is not a test file, skipping.\n"
+        );
     }
 
-    fn errored_test_file() -> TestFileReport {
-        TestFileReport::Errored(TestFileErroredReport {
-            file: "file".to_string(),
-            error: "error".to_string(),
-            elapsed: 0,
-        })
+    #[test]
+    fn it_reports_completed_test_with_failures() {
+        let reporter = HumanReporter;
+        let event = ReportEvent::TestCompleted(completed_test_file(
+            "test.nix",
+            150,
+            vec![failed_test_report(
+                vec!["suite", "test1"],
+                "test.nix:20",
+                vec![failed_check_report_with_message(
+                    "should fail",
+                    "Expected true but got false",
+                )],
+            )],
+        ));
+
+        check!(
+            reporter.on(&event).unwrap()
+                == "\
+File: test.nix (150ms)
+✗ suite -> test1 -> should fail
+    Failure:
+      Expected true but got false
+      at test.nix:20
+FAILED (1 failed)
+
+"
+        );
     }
 
-    fn failed_test_report() -> TestReport {
+    #[test]
+    fn it_reports_completed_test_with_failure_without_message() {
+        let reporter = HumanReporter;
+        let event = ReportEvent::TestCompleted(completed_test_file(
+            "test.nix",
+            75,
+            vec![failed_test_report(
+                vec!["test2"],
+                "test.nix:30",
+                vec![failed_check_report("check")],
+            )],
+        ));
+
+        check!(
+            reporter.on(&event).unwrap()
+                == "\
+File: test.nix (75ms)
+✗ test2 -> check
+    Failed at test.nix:30
+FAILED (1 failed)
+
+"
+        );
+    }
+
+    #[test]
+    fn it_reports_test_suite_completed_with_no_files() {
+        let reporter = HumanReporter;
+        let event = ReportEvent::TestSuiteCompleted(test_suite_report(vec![], 0));
+
+        check!(
+            reporter.on(&event).unwrap()
+                == "\
+No test files found
+"
+        );
+    }
+
+    #[test]
+    fn it_reports_test_suite_completed_all_passing() {
+        let reporter = HumanReporter;
+        let event = ReportEvent::TestSuiteCompleted(test_suite_report(
+            vec![completed_test_file("test1.nix", 50, vec![])],
+            100,
+        ));
+
+        check!(
+            reporter.on(&event).unwrap()
+                == "\
+All tests passed (100ms)
+"
+        );
+    }
+
+    #[test]
+    fn it_reports_test_suite_completed_with_failures() {
+        let reporter = HumanReporter;
+        let event = ReportEvent::TestSuiteCompleted(test_suite_report(
+            vec![
+                completed_test_file("test1.nix", 50, vec![]),
+                completed_test_file(
+                    "test2.nix",
+                    75,
+                    vec![failed_test_report(
+                        vec!["test"],
+                        "test2.nix:1",
+                        vec![failed_check_report("check")],
+                    )],
+                ),
+            ],
+            200,
+        ));
+
+        check!(
+            reporter.on(&event).unwrap()
+                == "\
+1 file(s) succeeded
+1 file(s) failed
+Total time: 200ms
+"
+        );
+    }
+
+    #[test]
+    fn it_reports_test_suite_completed_with_errors() {
+        let reporter = HumanReporter;
+        let event = ReportEvent::TestSuiteCompleted(test_suite_report(
+            vec![
+                completed_test_file("test1.nix", 50, vec![]),
+                errored_test_file("broken.nix", "error", 25),
+            ],
+            150,
+        ));
+
+        check!(
+            reporter.on(&event).unwrap()
+                == "\
+1 file(s) succeeded
+1 file(s) had errors
+Total time: 150ms
+"
+        );
+    }
+
+    #[test]
+    fn it_reports_test_suite_completed_with_mixed_results() {
+        let reporter = HumanReporter;
+        let event = ReportEvent::TestSuiteCompleted(test_suite_report(
+            vec![
+                completed_test_file("passing.nix", 30, vec![]),
+                completed_test_file(
+                    "failing.nix",
+                    40,
+                    vec![failed_test_report(
+                        vec!["test"],
+                        "failing.nix:1",
+                        vec![failed_check_report("check")],
+                    )],
+                ),
+                errored_test_file("broken.nix", "syntax error", 20),
+            ],
+            250,
+        ));
+
+        check!(
+            reporter.on(&event).unwrap()
+                == "\
+1 file(s) succeeded
+1 file(s) had errors
+1 file(s) failed
+Total time: 250ms
+"
+        );
+    }
+}
+
+#[cfg(test)]
+mod test_helpers {
+    use super::*;
+
+    #[allow(dead_code)]
+    pub fn passing_check_report(name: &str) -> CheckReport {
+        CheckReport {
+            name: name.to_string(),
+            success: true,
+            failure: None,
+        }
+    }
+
+    pub fn failed_check_report_with_message(name: &str, failure: &str) -> CheckReport {
+        CheckReport {
+            name: name.to_string(),
+            success: false,
+            failure: Some(failure.to_string()),
+        }
+    }
+
+    pub fn failed_check_report(name: &str) -> CheckReport {
+        CheckReport {
+            name: name.to_string(),
+            success: false,
+            failure: None,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn passing_test_report(
+        path: Vec<&str>,
+        location: &str,
+        checks: Vec<CheckReport>,
+    ) -> TestReport {
+        TestReport {
+            success: checks.iter().all(|c| c.success),
+            path: path.iter().map(|s| s.to_string()).collect(),
+            location: location.to_string(),
+            checks,
+        }
+    }
+
+    pub fn failed_test_report(
+        path: Vec<&str>,
+        location: &str,
+        checks: Vec<CheckReport>,
+    ) -> TestReport {
         TestReport {
             success: false,
-            path: vec!["test".to_string()],
-            location: "file:1".to_string(),
-            checks: vec![failed_check_report()],
+            path: path.iter().map(|s| s.to_string()).collect(),
+            location: location.to_string(),
+            checks,
         }
     }
 
-    fn failed_check_report() -> CheckReport {
-        CheckReport {
-            name: "check".to_string(),
-            success: false,
-            failure: Some("failed".to_string()),
-        }
+    pub fn completed_test_file(
+        file: &str,
+        elapsed: u128,
+        tests: Vec<TestReport>,
+    ) -> TestFileReport {
+        TestFileReport::Completed(TestFileCompletedReport {
+            file: file.to_string(),
+            elapsed,
+            tests,
+        })
+    }
+
+    pub fn errored_test_file(file: &str, error: &str, elapsed: u128) -> TestFileReport {
+        TestFileReport::Errored(TestFileErroredReport {
+            file: file.to_string(),
+            error: error.to_string(),
+            elapsed,
+        })
+    }
+
+    pub fn test_suite_report(files: Vec<TestFileReport>, elapsed: u128) -> TestSuiteReport {
+        TestSuiteReport::new(files, elapsed)
     }
 }

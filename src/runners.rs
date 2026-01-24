@@ -149,13 +149,11 @@ where
                 match tf {
                     TestFile::Valid(path) => Some(path.clone()),
                     TestFile::NotFound(path) => {
-                        self.reporter
-                            .on(&ReportEvent::TestFileNotFound(path.clone()));
+                        self.report(&ReportEvent::TestFileNotFound(path.clone()));
                         None
                     }
                     TestFile::Invalid(path) => {
-                        self.reporter
-                            .on(&ReportEvent::TestFileInvalid(path.clone()));
+                        self.report(&ReportEvent::TestFileInvalid(path.clone()));
                         None
                     }
                 }
@@ -166,8 +164,7 @@ where
             })
             .buffer_unordered(self.config.num_threads.get())
             .inspect(|report| {
-                self.reporter
-                    .on(&ReportEvent::TestCompleted(report.clone()));
+                self.report(&ReportEvent::TestCompleted(report.clone()));
             })
             .collect()
             .await;
@@ -175,10 +172,15 @@ where
         let elapsed = start.elapsed().as_millis();
         let suite_report = TestSuiteReport::new(file_reports, elapsed);
 
-        self.reporter
-            .on(&ReportEvent::TestSuiteCompleted(suite_report.clone()));
+        self.report(&ReportEvent::TestSuiteCompleted(suite_report.clone()));
 
         suite_report
+    }
+
+    fn report(&self, event: &ReportEvent) {
+        if let Some(message) = self.reporter.on(event) {
+            print!("{}", message);
+        }
     }
 }
 
@@ -229,7 +231,7 @@ mod test_suite_runner_tests {
                     elapsed: 0,
                 },
             ))))
-            .returning(|_event| {});
+            .returning(|_event| None);
         reporter
             .expect_on()
             .once()
@@ -242,7 +244,7 @@ mod test_suite_runner_tests {
                 })],
                 0,
             ))))
-            .returning(|_event| {});
+            .returning(|_event| None);
 
         let suite_runner = TestSuiteRunner::new(Arc::new(test_runner), reporter, Config::default());
 
@@ -263,13 +265,13 @@ mod test_suite_runner_tests {
             .in_sequence(&mut sequence)
             .once()
             .with(eq(ReportEvent::TestFileNotFound("missing.nix".to_string())))
-            .returning(|_event| {});
+            .returning(|_event| None);
         reporter
             .expect_on()
             .in_sequence(&mut sequence)
             .once()
             .with(eq(ReportEvent::TestFileInvalid("invalid.nix".to_string())))
-            .returning(|_event| {});
+            .returning(|_event| None);
         reporter
             .expect_on()
             .once()
@@ -278,7 +280,7 @@ mod test_suite_runner_tests {
                 vec![],
                 0,
             ))))
-            .returning(|_event| {});
+            .returning(|_event| None);
 
         let suite_runner = TestSuiteRunner::new(Arc::new(test_runner), reporter, Config::default());
 

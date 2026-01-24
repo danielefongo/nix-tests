@@ -40,10 +40,14 @@ pub struct ConfigArgs {
     )]
     num_threads: Option<usize>,
 
-    #[arg(long, value_enum, help = "Output format for test results")]
+    #[arg(
+        long,
+        value_enum,
+        help = "Output format for test results (under [report])"
+    )]
     format: Option<Format>,
 
-    #[arg(long, help = "Timeout for each test in milliseconds")]
+    #[arg(long, help = "Timeout for each test in milliseconds (under [runner])")]
     timeout: Option<u64>,
 }
 

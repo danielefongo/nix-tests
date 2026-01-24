@@ -46,9 +46,6 @@ pub struct ConfigArgs {
         help = "Output format for test results (under [report])"
     )]
     format: Option<Format>,
-
-    #[arg(long, help = "Timeout for each test in milliseconds (under [runner])")]
-    timeout: Option<u64>,
 }
 
 impl ConfigArgs {
@@ -59,7 +56,6 @@ impl ConfigArgs {
                     .num_threads
                     .map(Into::into)
                     .unwrap_or(base.runner.num_threads),
-                timeout: self.timeout.or(base.runner.timeout),
             },
             report: report_config::Config {
                 format: self
@@ -175,7 +171,6 @@ mod config_args_tests {
         let file_config = Config {
             runner: runner_config::Config {
                 num_threads: runner_config::NumThreads::new(8),
-                timeout: Some(5000),
             },
             report: report_config::Config {
                 format: report_config::Format::Human,
@@ -184,7 +179,6 @@ mod config_args_tests {
 
         let args = ConfigArgs {
             num_threads: Some(4),
-            timeout: None,
             format: None,
         };
 
@@ -194,7 +188,6 @@ mod config_args_tests {
                 == Config {
                     runner: runner_config::Config {
                         num_threads: runner_config::NumThreads::new(4),
-                        timeout: Some(5000),
                     },
                     report: report_config::Config {
                         format: report_config::Format::Human,
@@ -208,7 +201,6 @@ mod config_args_tests {
         let file_config = Config {
             runner: runner_config::Config {
                 num_threads: runner_config::NumThreads::new(8),
-                timeout: None,
             },
             report: report_config::Config {
                 format: report_config::Format::Json,
@@ -217,7 +209,6 @@ mod config_args_tests {
 
         let args = ConfigArgs {
             num_threads: None,
-            timeout: None,
             format: None,
         };
 
@@ -230,7 +221,6 @@ mod config_args_tests {
         let file_config = Config {
             runner: runner_config::Config {
                 num_threads: runner_config::NumThreads::new(8),
-                timeout: None,
             },
             report: report_config::Config {
                 format: report_config::Format::Human,
@@ -239,7 +229,6 @@ mod config_args_tests {
 
         let args = ConfigArgs {
             num_threads: Some(12),
-            timeout: Some(3000),
             format: Some(Format::Json),
         };
 
@@ -249,7 +238,6 @@ mod config_args_tests {
                 == Config {
                     runner: runner_config::Config {
                         num_threads: runner_config::NumThreads::new(12),
-                        timeout: Some(3000),
                     },
                     report: report_config::Config {
                         format: report_config::Format::Json,

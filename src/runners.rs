@@ -19,9 +19,6 @@ pub mod config {
     pub struct Config {
         #[serde(default)]
         pub num_threads: NumThreads,
-
-        #[serde(default)]
-        pub timeout: Option<u64>,
     }
 
     #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]

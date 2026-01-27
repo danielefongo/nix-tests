@@ -7,7 +7,7 @@ use crate::{
     files::TestFile,
     reports::{
         ReportEvent, Reporter, TestFileCompletedReport, TestFileErroredReport, TestFileReport,
-        TestSuiteReport,
+        TestReport, TestSuiteReport,
     },
 };
 
@@ -86,7 +86,7 @@ impl TestFileRunner for NixTestRunner {
         let output = Command::new("nix-instantiate")
             .args(["--eval", "--strict", "--json", &test_file])
             .args(["--arg", "nix-tests", &nix_tests])
-            .args(["-A", "result"])
+            .args(["-A", "tests"])
             .output()
             .await;
 
@@ -94,10 +94,12 @@ impl TestFileRunner for NixTestRunner {
 
         match output {
             Ok(output) if output.status.success() => {
-                match serde_json::from_slice::<TestFileCompletedReport>(&output.stdout) {
-                    Ok(report) => {
-                        TestFileReport::Completed(report.with_file(test_file).with_elapsed(elapsed))
-                    }
+                match serde_json::from_slice::<Vec<TestReport>>(&output.stdout) {
+                    Ok(reports) => TestFileReport::Completed(TestFileCompletedReport {
+                        file: test_file,
+                        tests: reports,
+                        elapsed,
+                    }),
                     Err(e) => TestFileReport::Errored(TestFileErroredReport {
                         file: test_file,
                         error: format!("Failed to deserialize test report: {}", e),
@@ -322,23 +324,21 @@ let
   # Custom check
   isEven = x: if lib.mod x 2 == 0 then true else "${builtins.toString x} is not even";
 in
-{
-  result = nix-tests.runTests {
-    "success" = {
-      context = {
-        num = 42;
-      };
-      checks = helpers: ctx: {
-        "number equals 42" = helpers.isEq ctx.num 42;
-        "number is even" = helpers.check isEven ctx.num;
-      };
+nix-tests.runTests {
+  "success" = {
+    context = {
+      num = 42;
     };
+    checks = helpers: ctx: {
+      "number equals 42" = helpers.isEq ctx.num 42;
+      "number is even" = helpers.check isEven ctx.num;
+    };
+  };
 
-    "failure" = {
-      context = { };
-      checks = helpers: _: {
-        "failed check" = helpers.isTrue false;
-      };
+  "failure" = {
+    context = { };
+    checks = helpers: _: {
+      "failed check" = helpers.isTrue false;
     };
   };
 }
@@ -356,31 +356,31 @@ in
                     TestReport {
                         success: true,
                         path: vec!["success".to_string()],
-                        location: format!("{}:13", path),
+                        location: format!("{}:12", path),
                         checks: vec![
                             CheckReport {
                                 name: "number equals 42".to_string(),
                                 success: true,
                                 failure: None,
-                                location: format!("{}:18", path),
+                                location: format!("{}:17", path),
                             },
                             CheckReport {
                                 name: "number is even".to_string(),
                                 success: true,
                                 failure: None,
-                                location: format!("{}:19", path),
+                                location: format!("{}:18", path),
                             },
                         ]
                     },
                     TestReport {
                         success: false,
                         path: vec!["failure".to_string()],
-                        location: format!("{}:23", path),
+                        location: format!("{}:22", path),
                         checks: vec![CheckReport {
                             name: "failed check".to_string(),
                             success: false,
                             failure: Some("Expected: true\nGot: false".to_string()),
-                            location: format!("{}:26", path),
+                            location: format!("{}:25", path),
                         }]
                     },
                 ]
@@ -394,28 +394,26 @@ in
   pkgs ? import <nixpkgs> { },
   nix-tests,
 }:
-{
-  result = nix-tests.runTests {
-    "group 1" = {
-      "test 1" = {
-        context = { };
-        checks = helpers: _: {
-          "check 1" = helpers.isTrue true;
-        };
-      };
-      "test 2" = {
-        context = { };
-        checks = helpers: _: {
-          "check 2" = helpers.isTrue true;
-        };
+nix-tests.runTests {
+  "group 1" = {
+    "test 1" = {
+      context = { };
+      checks = helpers: _: {
+        "check 1" = helpers.isTrue true;
       };
     };
-    "group 2" = {
-      "test 3" = {
-        context = { };
-        checks = helpers: _: {
-          "check 3" = helpers.isTrue true;
-        };
+    "test 2" = {
+      context = { };
+      checks = helpers: _: {
+        "check 2" = helpers.isTrue true;
+      };
+    };
+  };
+  "group 2" = {
+    "test 3" = {
+      context = { };
+      checks = helpers: _: {
+        "check 3" = helpers.isTrue true;
       };
     };
   };
@@ -434,34 +432,34 @@ in
                     TestReport {
                         success: true,
                         path: vec!["group 1".to_string(), "test 1".to_string()],
-                        location: format!("{}:8", path),
+                        location: format!("{}:7", path),
                         checks: vec![CheckReport {
                             name: "check 1".to_string(),
                             success: true,
                             failure: None,
-                            location: format!("{}:11", path),
+                            location: format!("{}:10", path),
                         },]
                     },
                     TestReport {
                         success: true,
                         path: vec!["group 1".to_string(), "test 2".to_string()],
-                        location: format!("{}:14", path),
+                        location: format!("{}:13", path),
                         checks: vec![CheckReport {
                             name: "check 2".to_string(),
                             success: true,
                             failure: None,
-                            location: format!("{}:17", path),
+                            location: format!("{}:16", path),
                         },]
                     },
                     TestReport {
                         success: true,
                         path: vec!["group 2".to_string(), "test 3".to_string()],
-                        location: format!("{}:22", path),
+                        location: format!("{}:21", path),
                         checks: vec![CheckReport {
                             name: "check 3".to_string(),
                             success: true,
                             failure: None,
-                            location: format!("{}:25", path),
+                            location: format!("{}:24", path),
                         },]
                     }
                 ]
@@ -488,7 +486,7 @@ in
   nix-tests,
 }:
 {
-  result = {
+  tests = {
     foo = "bar";
     baz = 123;
   };

@@ -107,14 +107,6 @@ pub struct TestFileCompletedReport {
 }
 
 impl TestFileCompletedReport {
-    pub fn with_file(mut self, file: String) -> Self {
-        self.file = file;
-        self
-    }
-    pub fn with_elapsed(mut self, elapsed: u128) -> Self {
-        self.elapsed = elapsed;
-        self
-    }
     fn failed_count(&self) -> usize {
         self.tests
             .iter()

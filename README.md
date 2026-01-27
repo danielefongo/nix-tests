@@ -84,31 +84,29 @@ let
   longerThan =
     n: s: if builtins.stringLength s > n then true else "'${s}' is not longer than ${toString n}";
 in
-{
-  result = nix-tests.runTests [
-    (nix-tests.test "random tests" {
-      context = {
-        num = 42;
-        name = "Alice";
-      };
-      checks = helpers: ctx: [
-        (helpers.isEq "number equals 42" ctx.num 42)
-        (helpers.isTrue "name is Alice" (ctx.name == "Alice"))
-        (helpers.isFalse "name is not Bob" (ctx.name == "Bob"))
-        (helpers.isNull "null check" null)
-        (helpers.isNotNull "not null check" ctx.name)
-        (helpers.hasAttr "has num attribute" "num" ctx)
-        (helpers.hasNotAttr "no age attribute" "age" ctx)
+nix-tests.runTests {
+  "random tests" = {
+    context = {
+      num = 42;
+      name = "Alice";
+    };
+    checks = helpers: ctx: {
+      "number equals 42" = helpers.isEq ctx.num 42;
+      "name is Alice" = helpers.isTrue (ctx.name == "Alice");
+      "name is not Bob" = helpers.isFalse (ctx.name == "Bob");
+      "null check" = helpers.isNull null;
+      "not null check" = helpers.isNotNull ctx.name;
+      "has num attribute" = helpers.hasAttr "num" ctx;
+      "no age attribute" = helpers.hasNotAttr "age" ctx;
 
-        # Custom checks
-        (helpers.check "is even" isEven ctx.num)
-        (helpers.check "long name" (longerThan 3) ctx.name)
-        (helpers.check "is less than 100" (
-          x: if x < 100 then true else "${toString x} is not less than 100"
-        ) ctx.num)
-      ];
-    })
-  ];
+      # Custom checks
+      "is even" = helpers.check isEven ctx.num;
+      "long name" = helpers.check (longerThan 3) ctx.name;
+      "is less than 100" = helpers.check (
+        x: if x < 100 then true else "${toString x} is not less than 100"
+      ) ctx.num;
+    };
+  };
 }
 ```
 
@@ -149,33 +147,48 @@ You can create a `.nix-tests.toml` file in your project. Use `nix-tests --show` 
 
 ## Limitations
 
-- **Error Location Precision**: When a test fails, the error pointer indicates the entire `checks` block rather than the specific individual check that failed. This is a fundamental limitation of Nix's `unsafeGetAttrPos`.
 - **Execution Time Granularity**: Execution time (`elapsed`) can only be measured at the file level, not for individual tests. This is because all tests in a file are evaluated together by a single `nix-instantiate` process, and timing is measured externally.
 
 ## API
 
-### Core Functions
+### Test Structure
 
-- `test name { context, checks }` - Create a test case
-- `group name tests` - Group multiple tests
-- `runTests tests` - Execute tests (returns true or throws)
+Tests are defined using an attribute set structure:
+
+```nix
+nix-tests.runTests {
+  "test name" = {
+    context = _: { /* test data */ }; # optional
+    checks = helpers: ctx: {
+      "check name" = helpers.assertion value;
+    };
+  };
+
+  "group name" = {
+    "nested test" = {
+      context = _: { };
+      checks = helpers: ctx: { /* ... */ };
+    };
+  };
+}
+```
 
 ### Checks
 
 All available via `helpers` parameter in `checks`:
 
-- `isEq name actual expected` - Assert equality
-- `isTrue name value` - Assert true
-- `isFalse name value` - Assert false
-- `isNull name value` - Assert null
-- `isNotNull name value` - Assert not null
-- `hasAttr name attrName attrset` - Assert attribute exists
-- `hasNotAttr name attrName attrset` - Assert attribute does not exist
-- `check name checkFn actual` - Generic check
+- `isEq actual expected` - Assert equality
+- `isTrue value` - Assert true
+- `isFalse value` - Assert false
+- `isNull value` - Assert null
+- `isNotNull value` - Assert not null
+- `hasAttr attrName attrset` - Assert attribute exists
+- `hasNotAttr attrName attrset` - Assert attribute does not exist
+- `check checkFn actual` - Generic check
 
 #### Custom checks
 
-Create custom checks using the `helpers.check` function or by defining check functions that return `true` for success or an error message string for failure:
+Create custom checks by defining functions that return `true` for success or an error message string for failure:
 
 ```nix
 # Custom checks examples
@@ -183,9 +196,11 @@ isEven = x: if lib.mod x 2 == 0 then true else "${builtins.toString x} is not ev
 longerThan = n: s: if builtins.stringLength s > n then true else "'${s}' is not longer than ${toString n}";
 
 # Usage in tests
-(helpers.check "is even" isEven ctx.num)
-(helpers.check "long name" (longerThan 3) ctx.name)
-(helpers.check "is less than 100" (
-  x: if x < 100 then true else "${toString x} is not less than 100"
-) ctx.num)
+checks = helpers: ctx: {
+  "is even" = helpers.check isEven ctx.num;
+  "long name" = helpers.check (longerThan 3) ctx.name;
+  "is less than 100" = helpers.check (
+    x: if x < 100 then true else "${toString x} is not less than 100"
+  ) ctx.num;
+};
 ```

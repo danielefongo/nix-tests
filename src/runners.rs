@@ -323,24 +323,24 @@ let
   isEven = x: if lib.mod x 2 == 0 then true else "${builtins.toString x} is not even";
 in
 {
-  result = nix-tests.runTests [
-    (nix-tests.test "success" {
+  result = nix-tests.runTests {
+    "success" = {
       context = {
         num = 42;
       };
-      checks = helpers: ctx: [
-        (helpers.isEq "number equals 42" ctx.num 42)
-        (helpers.check "number is even" isEven ctx.num)
-      ];
-    })
+      checks = helpers: ctx: {
+        "number equals 42" = helpers.isEq ctx.num 42;
+        "number is even" = helpers.check isEven ctx.num;
+      };
+    };
 
-    (nix-tests.test "failure" {
+    "failure" = {
       context = { };
-      checks = helpers: _: [
-        (helpers.isTrue "failed check" false)
-      ];
-    })
-  ];
+      checks = helpers: _: {
+        "failed check" = helpers.isTrue false;
+      };
+    };
+  };
 }
 "#,
         );
@@ -379,7 +379,7 @@ in
                             success: false,
                             failure: Some("Expected: true\nGot: false".to_string()),
                         }]
-                    }
+                    },
                 ]
         );
     }
@@ -392,30 +392,30 @@ in
   nix-tests,
 }:
 {
-  result = nix-tests.runTests [
-    (nix-tests.group "group 1" [
-      (nix-tests.test "test 1" {
+  result = nix-tests.runTests {
+    "group 1" = {
+      "test 1" = {
         context = { };
-        checks = helpers: _: [
-          (helpers.isTrue "check 1" true)
-        ];
-      })
-      (nix-tests.test "test 2" {
+        checks = helpers: _: {
+          "check 1" = helpers.isTrue true;
+        };
+      };
+      "test 2" = {
         context = { };
-        checks = helpers: _: [
-          (helpers.isTrue "check 2" true)
-        ];
-      })
-    ])
-    (nix-tests.group "group 2" [
-      (nix-tests.test "test 3" {
+        checks = helpers: _: {
+          "check 2" = helpers.isTrue true;
+        };
+      };
+    };
+    "group 2" = {
+      "test 3" = {
         context = { };
-        checks = helpers: _: [
-          (helpers.isTrue "check 3" true)
-        ];
-      })
-    ])
-  ];
+        checks = helpers: _: {
+          "check 3" = helpers.isTrue true;
+        };
+      };
+    };
+  };
 }
 "#,
         );

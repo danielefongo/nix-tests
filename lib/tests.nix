@@ -87,7 +87,8 @@ let
   runTest =
     path: location: spec:
     let
-      checkDefs = spec.checks helpers spec.context;
+      contextFn = if spec ? context then spec.context else { };
+      checkDefs = spec.checks helpers (contextFn { });
       checks = map (runCheck checkDefs) (sortByLine checkDefs);
       success = all (c: c.success) checks;
     in

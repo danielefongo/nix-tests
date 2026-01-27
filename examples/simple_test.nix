@@ -12,7 +12,7 @@ let
 in
 nix-tests.runTests {
   "random tests" = {
-    context = {
+    context = _: {
       num = 42;
       name = "Alice";
     };

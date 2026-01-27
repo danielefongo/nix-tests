@@ -326,7 +326,7 @@ let
 in
 nix-tests.runTests {
   "success" = {
-    context = {
+    context = _: {
       num = 42;
     };
     checks = helpers: ctx: {
@@ -336,7 +336,7 @@ nix-tests.runTests {
   };
 
   "failure" = {
-    context = { };
+    context = _: { };
     checks = helpers: _: {
       "failed check" = helpers.isTrue false;
     };
@@ -397,13 +397,13 @@ nix-tests.runTests {
 nix-tests.runTests {
   "group 1" = {
     "test 1" = {
-      context = { };
+      context = _: { };
       checks = helpers: _: {
         "check 1" = helpers.isTrue true;
       };
     };
     "test 2" = {
-      context = { };
+      context = _: { };
       checks = helpers: _: {
         "check 2" = helpers.isTrue true;
       };
@@ -411,7 +411,7 @@ nix-tests.runTests {
   };
   "group 2" = {
     "test 3" = {
-      context = { };
+      context = _: { };
       checks = helpers: _: {
         "check 3" = helpers.isTrue true;
       };

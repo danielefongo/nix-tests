@@ -356,28 +356,31 @@ in
                     TestReport {
                         success: true,
                         path: vec!["success".to_string()],
-                        location: format!("{}:17", path),
+                        location: format!("{}:13", path),
                         checks: vec![
                             CheckReport {
                                 name: "number equals 42".to_string(),
                                 success: true,
                                 failure: None,
+                                location: format!("{}:18", path),
                             },
                             CheckReport {
                                 name: "number is even".to_string(),
                                 success: true,
                                 failure: None,
+                                location: format!("{}:19", path),
                             },
                         ]
                     },
                     TestReport {
                         success: false,
                         path: vec!["failure".to_string()],
-                        location: format!("{}:25", path),
+                        location: format!("{}:23", path),
                         checks: vec![CheckReport {
                             name: "failed check".to_string(),
                             success: false,
                             failure: Some("Expected: true\nGot: false".to_string()),
+                            location: format!("{}:26", path),
                         }]
                     },
                 ]
@@ -431,31 +434,34 @@ in
                     TestReport {
                         success: true,
                         path: vec!["group 1".to_string(), "test 1".to_string()],
-                        location: format!("{}:10", path),
+                        location: format!("{}:8", path),
                         checks: vec![CheckReport {
                             name: "check 1".to_string(),
                             success: true,
                             failure: None,
+                            location: format!("{}:11", path),
                         },]
                     },
                     TestReport {
                         success: true,
                         path: vec!["group 1".to_string(), "test 2".to_string()],
-                        location: format!("{}:16", path),
+                        location: format!("{}:14", path),
                         checks: vec![CheckReport {
                             name: "check 2".to_string(),
                             success: true,
                             failure: None,
+                            location: format!("{}:17", path),
                         },]
                     },
                     TestReport {
                         success: true,
                         path: vec!["group 2".to_string(), "test 3".to_string()],
-                        location: format!("{}:24", path),
+                        location: format!("{}:22", path),
                         checks: vec![CheckReport {
                             name: "check 3".to_string(),
                             success: true,
                             failure: None,
+                            location: format!("{}:25", path),
                         },]
                     }
                 ]

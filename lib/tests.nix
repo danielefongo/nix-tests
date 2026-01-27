@@ -61,6 +61,8 @@ let
   runCheck =
     checkDefs: name:
     let
+      location = getLocation (builtins.unsafeGetAttrPos name checkDefs);
+
       checkDef = checkDefs.${name};
       checkResult = checkDef._checkFn checkDef._actual;
 
@@ -76,16 +78,15 @@ let
     {
       inherit
         name
+        location
         success
         failure
         ;
     };
 
   runTest =
-    path: spec:
+    path: location: spec:
     let
-      location = getLocation (builtins.unsafeGetAttrPos "checks" spec);
-
       checkDefs = spec.checks helpers spec.context;
       checks = map (runCheck checkDefs) (sortByLine checkDefs);
       success = all (c: c.success) checks;
@@ -108,8 +109,9 @@ let
       let
         value = attrs.${name};
         newPath = pathPrefix ++ [ name ];
+        location = getLocation (builtins.unsafeGetAttrPos name attrs);
       in
-      if isTest value then [ (runTest newPath value) ] else flattenTests newPath value
+      if isTest value then [ (runTest newPath location value) ] else flattenTests newPath value
     ) (sortByLine attrs);
 in
 {

@@ -137,6 +137,7 @@ pub struct CheckReport {
     pub success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failure: Option<String>,
+    pub location: String,
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq, Clone)]
@@ -213,9 +214,9 @@ impl HumanReporter {
                                 for line in failure.lines() {
                                     output.push_str(&format!("      {}\n", line));
                                 }
-                                output.push_str(&format!("      at {}\n", test.location));
+                                output.push_str(&format!("      at {}\n", check.location));
                             } else {
-                                output.push_str(&format!("    Failed at {}\n", test.location));
+                                output.push_str(&format!("    Failed at {}\n", check.location));
                             }
                         }
                     }
@@ -455,7 +456,7 @@ File: test.nix (150ms)
 ✗ suite -> test1 -> should fail
     Failure:
       Expected true but got false
-      at test.nix:20
+      at my_test.nix:30
 FAILED (1 failed)
 
 "
@@ -480,7 +481,7 @@ FAILED (1 failed)
                 == "\
 File: test.nix (75ms)
 ✗ test2 -> check
-    Failed at test.nix:30
+    Failed at my_test.nix:30
 FAILED (1 failed)
 
 "
@@ -784,6 +785,7 @@ mod test_helpers {
             name: name.to_string(),
             success: true,
             failure: None,
+            location: "my_test.nix:30".to_string(),
         }
     }
 
@@ -792,6 +794,7 @@ mod test_helpers {
             name: name.to_string(),
             success: false,
             failure: Some(failure.to_string()),
+            location: "my_test.nix:30".to_string(),
         }
     }
 
@@ -800,6 +803,7 @@ mod test_helpers {
             name: name.to_string(),
             success: false,
             failure: None,
+            location: "my_test.nix:30".to_string(),
         }
     }
 

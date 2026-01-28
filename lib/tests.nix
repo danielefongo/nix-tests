@@ -3,22 +3,6 @@ let
   concatMap = f: list: builtins.concatLists (map f list);
   all = pred: list: builtins.all pred list;
 
-  executeCheck =
-    checkName: result:
-    if builtins.isBool result then
-      {
-        name = checkName;
-        success = result;
-      }
-    else if builtins.isString result then
-      {
-        name = checkName;
-        failure = result;
-        success = false;
-      }
-    else
-      throw "Check must return either boolean or string, got: ${builtins.typeOf result}";
-
   checkEq =
     expected: actual:
     if actual == expected then
@@ -42,66 +26,106 @@ let
     else
       true;
 
-  mkHelpers =
-    pos:
+  helpers =
     let
-      check =
-        checkName: checkLambda: actual:
-        executeCheck checkName (checkLambda actual);
+      check = checkFn: actual: {
+        _checkFn = checkFn;
+        _actual = actual;
+      };
     in
     {
       inherit check;
-      isEq =
-        checkName: actual: expected:
-        check checkName (checkEq expected) actual;
-      isTrue = checkName: actual: check checkName (checkEq true) actual;
-      isFalse = checkName: actual: check checkName (checkEq false) actual;
-      isNull = checkName: actual: check checkName (checkEq null) actual;
-      isNotNull = checkName: actual: check checkName checkNotNull actual;
-      hasAttr =
-        checkName: attrName: attrSet:
-        check checkName (checkHasAttr attrName) attrSet;
-      hasNotAttr =
-        checkName: attrName: attrSet:
-        check checkName (checkHasNotAttr attrName) attrSet;
+      isEq = actual: expected: check (checkEq expected) actual;
+      isTrue = actual: check (checkEq true) actual;
+      isFalse = actual: check (checkEq false) actual;
+      isNull = actual: check (checkEq null) actual;
+      isNotNull = actual: check checkNotNull actual;
+      hasAttr = attrName: attrSet: check (checkHasAttr attrName) attrSet;
+      hasNotAttr = attrName: attrSet: check (checkHasNotAttr attrName) attrSet;
+    };
+
+  getLocation = pos: if pos != null then "${pos.file}:${toString pos.line}" else "unknown";
+
+  sortByLine =
+    attrs:
+    let
+      names = builtins.attrNames attrs;
+      getLine = name:
+        let pos = builtins.unsafeGetAttrPos name attrs;
+        in if pos != null then pos.line else 0;
+      withPos = map (name: {
+        inherit name;
+        line = getLine name;
+      }) names;
+      sorted = builtins.sort (a: b: a.line < b.line) withPos;
+    in
+    map (x: x.name) sorted;
+
+  runCheck =
+    checkDefs: name:
+    let
+      location = getLocation (builtins.unsafeGetAttrPos name checkDefs);
+
+      checkDef = checkDefs.${name};
+      checkResult = checkDef._checkFn checkDef._actual;
+
+      success =
+        if builtins.isBool checkResult then
+          checkResult
+        else if builtins.isString checkResult then
+          false
+        else
+          throw "Check must return either boolean or string, got: ${builtins.typeOf checkResult}";
+      failure = if builtins.isString checkResult then checkResult else null;
+    in
+    {
+      inherit
+        name
+        location
+        success
+        failure
+        ;
     };
 
   runTest =
-    path: spec:
+    path: location: spec:
     let
-      pos = builtins.unsafeGetAttrPos "checks" spec;
-      location = if pos != null then "${pos.file}:${toString pos.line}" else "unknown";
-      checks = spec.checks (mkHelpers pos) spec.context;
+      testResult = spec helpers;
+      checkNames = builtins.filter (name: isCheck testResult.${name}) (sortByLine testResult);
+      checks = map (runCheck testResult) checkNames;
       success = all (c: c.success) checks;
     in
     {
       inherit
-        checks
-        location
         path
+        location
         success
+        checks
         ;
     };
 
+  isTest = value: builtins.isFunction value;
+  isCheck = value: builtins.isAttrs value && value ? _checkFn && value ? _actual;
+
   flattenTests =
-    pathPrefix: item:
-    if item ? tests then
-      concatMap (child: flattenTests (pathPrefix ++ [ item.name ]) child) item.tests
-    else
-      [ (runTest (pathPrefix ++ [ item.name ]) item.spec) ];
+    pathPrefix: attrs:
+    concatMap (
+      name:
+      let
+        value = attrs.${name};
+        newPath = pathPrefix ++ [ name ];
+        location = getLocation (builtins.unsafeGetAttrPos name attrs);
+      in
+      if isTest value then [ (runTest newPath location value) ] else flattenTests newPath value
+    ) (sortByLine attrs);
 in
 {
-  test = name: spec: {
-    inherit name spec;
-  };
-
-  group = name: tests: {
-    inherit name tests;
-  };
-
-  runTests = tests:
+  runTests =
+    tests:
     let
-      result = { tests = concatMap (item: flattenTests [ ] item) tests; };
+      result = {
+        tests = flattenTests [ ] tests;
+      };
     in
-      builtins.deepSeq result result;
+    builtins.deepSeq result result;
 }

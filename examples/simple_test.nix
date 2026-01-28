@@ -10,29 +10,26 @@ let
   longerThan =
     n: s: if builtins.stringLength s > n then true else "'${s}' is not longer than ${toString n}";
 in
-{
-  result = nix-tests.runTests [
-    (nix-tests.test "random tests" {
-      context = {
-        num = 42;
-        name = "Alice";
-      };
-      checks = helpers: ctx: [
-        (helpers.isEq "number equals 42" ctx.num 42)
-        (helpers.isTrue "name is Alice" (ctx.name == "Alice"))
-        (helpers.isFalse "name is not Bob" (ctx.name == "Bob"))
-        (helpers.isNull "null check" null)
-        (helpers.isNotNull "not null check" ctx.name)
-        (helpers.hasAttr "has num attribute" "num" ctx)
-        (helpers.hasNotAttr "no age attribute" "age" ctx)
+nix-tests.runTests {
+  "random tests" = helpers: rec {
+    ctx = {
+      num = 42;
+      name = "Alice";
+    };
 
-        # Custom checks
-        (helpers.check "is even" isEven ctx.num)
-        (helpers.check "long name" (longerThan 3) ctx.name)
-        (helpers.check "is less than 100" (
-          x: if x < 100 then true else "${toString x} is not less than 100"
-        ) ctx.num)
-      ];
-    })
-  ];
+    "number equals 42" = helpers.isEq ctx.num 42;
+    "name is Alice" = helpers.isTrue (ctx.name == "Alice");
+    "name is not Bob" = helpers.isFalse (ctx.name == "Bob");
+    "null check" = helpers.isNull null;
+    "not null check" = helpers.isNotNull ctx.name;
+    "has num attribute" = helpers.hasAttr "num" ctx;
+    "no age attribute" = helpers.hasNotAttr "age" ctx;
+
+    # Custom checks
+    "is even" = helpers.check isEven ctx.num;
+    "long name" = helpers.check (longerThan 3) ctx.name;
+    "is less than 100" = helpers.check (
+      x: if x < 100 then true else "${toString x} is not less than 100"
+    ) ctx.num;
+  };
 }

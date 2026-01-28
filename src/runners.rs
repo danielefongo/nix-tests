@@ -214,7 +214,6 @@ where
 mod test_suite_runner_tests {
     use std::sync::Arc;
 
-    use assert2::check;
     use futures::FutureExt;
     use mockall::{predicate::eq, Sequence};
 
@@ -222,8 +221,7 @@ mod test_suite_runner_tests {
     use crate::{
         files::TestFile,
         reports::{
-            MockReporter, ReportEvent, TestFileCompletedReport, TestFileReport,
-            TestFileTimedOutReport, TestSuiteReport,
+            MockReporter, ReportEvent, TestFileCompletedReport, TestFileReport, TestSuiteReport,
         },
         runners::config::Config,
     };

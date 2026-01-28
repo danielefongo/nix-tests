@@ -14,6 +14,7 @@ tokio = { version = "1.49.0", features = [
   "rt-multi-thread",
   "time",
   "process",
+  "signal",
 ] }
 futures = "0.3.31"
 num_cpus = "1.17.0"

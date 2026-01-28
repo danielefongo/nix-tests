@@ -2,6 +2,7 @@ use std::{path::Path, sync::Arc};
 
 use anyhow::bail;
 use clap::{Args as ClapArgs, Parser, ValueEnum};
+use tokio::signal::unix::{signal, SignalKind};
 
 use crate::{
     config::Config,
@@ -152,16 +153,21 @@ async fn main() -> anyhow::Result<()> {
 
     let test_files = find_files(args.paths)?;
 
-    let report = TestSuiteRunner::new(
+    let runner = TestSuiteRunner::new(
         Arc::new(NixTestRunner::new(config.runner.timeout)),
         ConfigurableReporter::new(&config.report),
         config.runner,
-    )
-    .run(&test_files)
-    .await;
+    );
 
-    if report.has_issues() {
-        std::process::exit(1);
+    tokio::select! {
+        report = runner.run(&test_files) => {
+            if report.has_issues() {
+                std::process::exit(1);
+            }
+        }
+        code = shutdown_signal() => {
+            std::process::exit(code);
+        }
     }
 
     Ok(())
@@ -204,6 +210,18 @@ fn command_exists(cmd: &str) -> bool {
         .output()
         .map(|output| output.status.success())
         .unwrap_or(false)
+}
+
+async fn shutdown_signal() -> i32 {
+    let mut sigint = signal(SignalKind::interrupt()).unwrap();
+    let mut sigterm = signal(SignalKind::terminate()).unwrap();
+    let mut sighup = signal(SignalKind::hangup()).unwrap();
+
+    tokio::select! {
+        _ = sigint.recv() => 130,
+        _ = sigterm.recv() => 143,
+        _ = sighup.recv() => 129,
+    }
 }
 
 #[cfg(test)]

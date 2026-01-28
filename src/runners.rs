@@ -1,13 +1,13 @@
-use std::{env, future::Future, sync::Arc, time::Instant};
+use std::{env, future::Future, process::Stdio, sync::Arc, time::Duration};
 
 use futures::{stream, StreamExt};
-use tokio::process::Command;
+use tokio::{process::Command, time::Instant};
 
 use crate::{
     files::TestFile,
     reports::{
         ReportEvent, Reporter, TestFileCompletedReport, TestFileErroredReport, TestFileReport,
-        TestReport, TestSuiteReport,
+        TestFileTimedOutReport, TestReport, TestSuiteReport,
     },
 };
 
@@ -19,6 +19,9 @@ pub mod config {
     pub struct Config {
         #[serde(default)]
         pub num_threads: NumThreads,
+
+        #[serde(default)]
+        pub timeout: u64,
     }
 
     #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -66,58 +69,82 @@ mockall::mock! {
 #[derive(Clone)]
 pub struct NixTestRunner {
     nix_tests_path: String,
+    timeout: u64,
 }
 
 impl NixTestRunner {
-    pub fn new() -> Self {
+    pub fn new(timeout: u64) -> Self {
         let nix_tests_path = env::var("NIX_TESTS_LIB_PATH")
             .expect("NIX_TESTS_LIB_PATH environment variable not set");
 
-        Self { nix_tests_path }
+        Self {
+            nix_tests_path,
+            timeout,
+        }
     }
 }
 
 impl TestFileRunner for NixTestRunner {
     async fn run(&self, test_file: String) -> TestFileReport {
         let start = Instant::now();
-
         let nix_tests = format!("import {} {{}}", self.nix_tests_path);
 
-        let output = Command::new("nix-instantiate")
-            .args(["--eval", "--strict", "--json", &test_file])
+        let errored = |error: String| {
+            TestFileReport::Errored(TestFileErroredReport {
+                file: test_file.clone(),
+                error,
+                elapsed: start.elapsed().as_millis(),
+            })
+        };
+
+        let mut cmd = Command::new("nix-instantiate");
+        cmd.args(["--eval", "--strict", "--json", &test_file])
             .args(["--arg", "nix-tests", &nix_tests])
             .args(["-A", "tests"])
-            .output()
-            .await;
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
 
-        let elapsed = start.elapsed().as_millis();
+        let output_future = cmd.output();
 
-        match output {
-            Ok(output) if output.status.success() => {
-                match serde_json::from_slice::<Vec<TestReport>>(&output.stdout) {
-                    Ok(reports) => TestFileReport::Completed(TestFileCompletedReport {
-                        file: test_file,
-                        tests: reports,
-                        elapsed,
-                    }),
-                    Err(e) => TestFileReport::Errored(TestFileErroredReport {
-                        file: test_file,
-                        error: format!("Failed to deserialize test report: {}", e),
-                        elapsed,
-                    }),
-                }
-            }
-            Ok(output) => TestFileReport::Errored(TestFileErroredReport {
-                file: test_file,
-                error: String::from_utf8_lossy(&output.stderr).to_string(),
-                elapsed,
-            }),
-            Err(e) => TestFileReport::Errored(TestFileErroredReport {
-                file: test_file,
-                error: format!("Failed to execute nix-instantiate: {}", e),
-                elapsed,
-            }),
+        let output = if self.timeout > 0 {
+            let Ok(result) =
+                tokio::time::timeout(Duration::from_millis(self.timeout), output_future).await
+            else {
+                return TestFileReport::TimedOut(TestFileTimedOutReport {
+                    file: test_file,
+                    timeout: self.timeout,
+                    elapsed: start.elapsed().as_millis(),
+                });
+            };
+            result
+        } else {
+            output_future.await
+        };
+
+        let Ok(output) = output else {
+            return errored(format!(
+                "Failed to execute nix-instantiate: {}",
+                output.unwrap_err()
+            ));
+        };
+
+        if !output.status.success() {
+            return errored(String::from_utf8_lossy(&output.stderr).into_owned());
         }
+
+        let Ok(reports) = serde_json::from_slice::<Vec<TestReport>>(&output.stdout) else {
+            return errored(format!(
+                "Failed to deserialize test report: {}",
+                serde_json::from_slice::<Vec<TestReport>>(&output.stdout).unwrap_err()
+            ));
+        };
+
+        TestFileReport::Completed(TestFileCompletedReport {
+            file: test_file,
+            tests: reports,
+            elapsed: start.elapsed().as_millis(),
+        })
     }
 }
 
@@ -187,13 +214,16 @@ where
 mod test_suite_runner_tests {
     use std::sync::Arc;
 
+    use assert2::check;
     use futures::FutureExt;
     use mockall::{predicate::eq, Sequence};
 
     use super::*;
     use crate::{
+        files::TestFile,
         reports::{
-            MockReporter, ReportEvent, TestFileCompletedReport, TestFileReport, TestSuiteReport,
+            MockReporter, ReportEvent, TestFileCompletedReport, TestFileReport,
+            TestFileTimedOutReport, TestSuiteReport,
         },
         runners::config::Config,
     };
@@ -248,7 +278,7 @@ mod test_suite_runner_tests {
         let suite_runner = TestSuiteRunner::new(Arc::new(test_runner), reporter, Config::default());
 
         suite_runner
-            .run(&[crate::files::TestFile::Valid("my_test.nix".to_string())])
+            .run(&[TestFile::Valid("my_test.nix".to_string())])
             .await;
     }
 
@@ -285,8 +315,8 @@ mod test_suite_runner_tests {
 
         suite_runner
             .run(&[
-                crate::files::TestFile::NotFound("missing.nix".to_string()),
-                crate::files::TestFile::Invalid("invalid.nix".to_string()),
+                TestFile::NotFound("missing.nix".to_string()),
+                TestFile::Invalid("invalid.nix".to_string()),
             ])
             .await;
     }
@@ -340,7 +370,7 @@ nix-tests.runTests {
 "#,
         );
 
-        let report = NixTestRunner::new().run(path.clone()).await;
+        let report = NixTestRunner::new(0).run(path.clone()).await;
 
         let_assert!(TestFileReport::Completed(file_report) = report);
         check!(file_report.file == path);
@@ -407,7 +437,7 @@ nix-tests.runTests {
 "#,
         );
 
-        let report = NixTestRunner::new().run(path.clone()).await;
+        let report = NixTestRunner::new(0).run(path.clone()).await;
 
         let_assert!(TestFileReport::Completed(file_report) = report);
         check!(file_report.file == path);
@@ -456,12 +486,10 @@ nix-tests.runTests {
     async fn it_handles_nix_evaluation_errors() {
         let (_file, path) = create_temp_nix_file("invalid_nix_syntax_here");
 
-        let report = NixTestRunner::new().run(path.clone()).await;
+        let report = NixTestRunner::new(0).run(path.clone()).await;
 
-        let_assert!(TestFileReport::Errored(file_report) = report);
-        check!(file_report.file == path);
-        check!(file_report.error.contains("error:"));
-        check!(file_report.elapsed > 0);
+        let_assert!(TestFileReport::Errored(err_report) = report);
+        check!(err_report.error.contains("error:"));
     }
 
     #[tokio::test]
@@ -480,12 +508,10 @@ nix-tests.runTests {
 "#,
         );
 
-        let report = NixTestRunner::new().run(path.clone()).await;
+        let report = NixTestRunner::new(0).run(path.clone()).await;
 
-        let_assert!(TestFileReport::Errored(file_report) = report);
-        check!(file_report.file == path);
-        check!(file_report.elapsed > 0);
-        check!(file_report
+        let_assert!(TestFileReport::Errored(err_report) = report);
+        check!(err_report
             .error
             .contains("Failed to deserialize test report"));
     }
@@ -493,13 +519,40 @@ nix-tests.runTests {
     #[tokio::test]
     async fn it_handles_command_execution_failure() {
         let invalid_path = "test\0file.nix".to_string();
-        let report = NixTestRunner::new().run(invalid_path.clone()).await;
+        let report = NixTestRunner::new(0).run(invalid_path.clone()).await;
 
-        let_assert!(TestFileReport::Errored(file_report) = report);
-        check!(file_report.file == invalid_path);
-        check!(file_report.elapsed >= 0);
-        check!(file_report
+        let_assert!(TestFileReport::Errored(err_report) = report);
+        check!(err_report
             .error
             .contains("Failed to execute nix-instantiate"));
+    }
+
+    #[tokio::test]
+    async fn it_stops_slow_tests() {
+        let (_file, path) = create_temp_nix_file(
+            r#"{
+  pkgs ? import <nixpkgs> { },
+  nix-tests,
+}:
+let
+  lib = pkgs.lib;
+  heavyComputation = builtins.foldl' (acc: x: 
+    acc ++ (builtins.genList (y: x * y) 10000)
+  ) [] (builtins.genList (x: x) 10000);
+in
+{
+  tests = heavyComputation;
+}
+"#,
+        );
+
+        let timeout_ms = 50;
+        let report = NixTestRunner::new(timeout_ms).run(path.clone()).await;
+
+        let_assert!(TestFileReport::TimedOut(file_report) = report);
+        check!(file_report.file == path);
+        check!(file_report.timeout == timeout_ms);
+        check!(file_report.elapsed >= timeout_ms as u128);
+        check!(file_report.elapsed < (timeout_ms + 100) as u128);
     }
 }

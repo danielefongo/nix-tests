@@ -40,6 +40,12 @@ pub struct RunnerArgs {
         value_parser = clap::builder::RangedU64ValueParser::<usize>::new().range(1..=1024)
     )]
     num_threads: Option<usize>,
+
+    #[arg(
+        long,
+        help = "Timeout in milliseconds for each test file (0 for no timeout)"
+    )]
+    timeout: Option<u64>,
 }
 
 #[derive(Default, Debug, ClapArgs, Clone)]
@@ -91,6 +97,7 @@ impl ConfigArgs {
                     .num_threads
                     .map(Into::into)
                     .unwrap_or(base.runner.num_threads),
+                timeout: self.runner.timeout.unwrap_or(base.runner.timeout),
             },
             report: report_config::Config {
                 format: self
@@ -146,7 +153,7 @@ async fn main() -> anyhow::Result<()> {
     let test_files = find_files(args.paths)?;
 
     let report = TestSuiteRunner::new(
-        Arc::new(NixTestRunner::new()),
+        Arc::new(NixTestRunner::new(config.runner.timeout)),
         ConfigurableReporter::new(&config.report),
         config.runner,
     )
@@ -213,6 +220,7 @@ mod config_args_tests {
         let file_config = Config {
             runner: runner_config::Config {
                 num_threads: runner_config::NumThreads::new(8),
+                timeout: 0,
             },
             report: report_config::Config {
                 format: report_config::Format::Human,
@@ -225,6 +233,7 @@ mod config_args_tests {
         let args = ConfigArgs {
             runner: RunnerArgs {
                 num_threads: Some(4),
+                timeout: None,
             },
             ..Default::default()
         };
@@ -235,6 +244,7 @@ mod config_args_tests {
                 == Config {
                     runner: runner_config::Config {
                         num_threads: runner_config::NumThreads::new(4),
+                        timeout: 0,
                     },
                     report: report_config::Config {
                         format: report_config::Format::Human,
@@ -251,6 +261,7 @@ mod config_args_tests {
         let file_config = Config {
             runner: runner_config::Config {
                 num_threads: runner_config::NumThreads::new(8),
+                timeout: 0,
             },
             report: report_config::Config {
                 format: report_config::Format::Json,
@@ -271,6 +282,7 @@ mod config_args_tests {
         let file_config = Config {
             runner: runner_config::Config {
                 num_threads: runner_config::NumThreads::new(8),
+                timeout: 0,
             },
             report: report_config::Config {
                 format: report_config::Format::Human,
@@ -283,6 +295,7 @@ mod config_args_tests {
         let args = ConfigArgs {
             runner: RunnerArgs {
                 num_threads: Some(12),
+                timeout: None,
             },
             report: ReportArgs {
                 format: Some(Format::Json),
@@ -298,6 +311,7 @@ mod config_args_tests {
                 == Config {
                     runner: runner_config::Config {
                         num_threads: runner_config::NumThreads::new(12),
+                        timeout: 0,
                     },
                     report: report_config::Config {
                         format: report_config::Format::Json,

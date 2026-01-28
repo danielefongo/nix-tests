@@ -29,6 +29,7 @@ pub mod config {
                 TestFileReport::Completed(r) if r.failed_count() == 0 => self.hide_succeeded,
                 TestFileReport::Completed(_) => self.hide_failed,
                 TestFileReport::Errored(_) => self.hide_errored,
+                TestFileReport::TimedOut(_) => self.hide_errored,
             }
         }
     }
@@ -61,6 +62,7 @@ impl TestSuiteReport {
             .filter(|report| match report {
                 TestFileReport::Completed(report) => report.failed_count() == 0,
                 TestFileReport::Errored(_) => false,
+                TestFileReport::TimedOut(_) => false,
             })
             .count()
     }
@@ -70,6 +72,7 @@ impl TestSuiteReport {
             .filter(|report| match report {
                 TestFileReport::Completed(report) => report.failed_count() > 0,
                 TestFileReport::Errored(_) => false,
+                TestFileReport::TimedOut(_) => false,
             })
             .count()
     }
@@ -79,6 +82,12 @@ impl TestSuiteReport {
             .filter(|report| matches!(report, TestFileReport::Errored(_)))
             .count()
     }
+    fn timed_out_files(&self) -> usize {
+        self.reports
+            .iter()
+            .filter(|report| matches!(report, TestFileReport::TimedOut(_)))
+            .count()
+    }
     fn total_elapsed(&self) -> u128 {
         self.elapsed
     }
@@ -86,15 +95,17 @@ impl TestSuiteReport {
         self.reports.iter().any(|report| match report {
             TestFileReport::Completed(report) => report.failed_count() > 0,
             TestFileReport::Errored(_) => true,
+            TestFileReport::TimedOut(_) => true,
         })
     }
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq, Clone)]
-#[serde(untagged)]
+#[serde(tag = "status", rename_all = "snake_case")]
 pub enum TestFileReport {
     Completed(TestFileCompletedReport),
     Errored(TestFileErroredReport),
+    TimedOut(TestFileTimedOutReport),
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
@@ -136,6 +147,13 @@ pub struct CheckReport {
 pub struct TestFileErroredReport {
     pub file: String,
     pub error: String,
+    pub elapsed: u128,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq, Clone)]
+pub struct TestFileTimedOutReport {
+    pub file: String,
+    pub timeout: u64,
     pub elapsed: u128,
 }
 
@@ -223,6 +241,11 @@ impl HumanReporter {
                 output.push_str(&format!("File: {} ({}ms)\n", report.file, report.elapsed));
                 output.push_str(&format!("ERROR: {}\n", report.error));
             }
+            TestFileReport::TimedOut(report) => {
+                output.push_str(&format!("File: {} ({}ms)\n", report.file, report.elapsed));
+                output.push_str(&format!("TIMEOUT: Exceeded {}ms limit\n", report.timeout));
+                output.push('\n');
+            }
         }
 
         output
@@ -250,7 +273,10 @@ impl Reporter for HumanReporter {
 
                 if report.processed_files() == 0 {
                     output.push_str("No test files found\n");
-                } else if report.failed_files() == 0 && report.errored_files() == 0 {
+                } else if report.failed_files() == 0
+                    && report.errored_files() == 0
+                    && report.timed_out_files() == 0
+                {
                     output.push_str(&format!(
                         "All tests passed ({}ms)\n",
                         report.total_elapsed()
@@ -263,6 +289,10 @@ impl Reporter for HumanReporter {
                     }
                     if report.failed_files() > 0 {
                         output.push_str(&format!("{} file(s) failed\n", report.failed_files()));
+                    }
+                    if report.timed_out_files() > 0 {
+                        output
+                            .push_str(&format!("{} file(s) timed out\n", report.timed_out_files()));
                     }
                     output.push_str(&format!("Total time: {}ms\n", report.total_elapsed()));
                 }

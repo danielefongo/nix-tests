@@ -1,5 +1,7 @@
 # nix-tests
 
+Moved to [codeberg](https://codeberg.org/danielefongo/nix-tests).
+
 ![Nix](https://img.shields.io/badge/Nix-5277C3?style=flat-square&logo=nix&logoColor=white)
 ![Rust](https://img.shields.io/badge/Rust-000000?style=flat-square&logo=rust&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)
